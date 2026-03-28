@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 150
     TOP_K: int = 4
 
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env"} #for local development
 
 
 settings = Settings()
