@@ -8,6 +8,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# ดาวน์โหลด Embedding Model (BGE-M3) ไว้ล่วงหน้าตอน Build
+# เพื่อไม่ต้องดาวน์โหลดตอน Container เริ่มทำงาน (ป้องกัน Health Check Timeout)
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-m3')"
+
 # ก๊อปปี้โค้ดทั้งหมดในโฟลเดอร์ของเราไปไว้ใน Container
 COPY . .
 
