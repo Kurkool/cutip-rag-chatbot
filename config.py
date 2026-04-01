@@ -12,10 +12,14 @@ class Settings(BaseSettings):
     def strip_whitespace(cls, v: str) -> str:
         return v.strip()
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     LLM_MODEL: str = "claude-sonnet-4-6"
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 150
-    TOP_K: int = 4
+    RETRIEVAL_K: int = 10  # จำนวน chunks ที่ดึงมาก่อน rerank
+    TOP_K: int = 4  # จำนวน chunks สุดท้ายหลัง rerank
+    MAX_HISTORY_TURNS: int = 5  # จำนวนรอบสนทนาที่เก็บไว้ต่อ user
+    MEMORY_TTL: int = 1800  # หมดอายุหลัง 30 นาทีไม่มีข้อความ
 
     model_config = {"env_file": ".env"} #for local development
 

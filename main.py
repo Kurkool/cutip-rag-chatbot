@@ -9,29 +9,31 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import settings
 from schemas import ChatRequest, ChatResponse, IngestResponse
 from services.embedding import get_embedding_model
-from services.rag_chain import get_rag_chain
+from services.memory import conversation_memory
+from services.rag_chain import get_query_condenser, get_rag_chain
+from services.reranker import get_reranker, rerank_documents
 from services.vectorstore import get_vectorstore
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: โหลด Embedding Model, เชื่อมต่อ Pinecone, และสร้าง RAG Chain ล่วงหน้า
-    # เพื่อให้ Application พร้อมรับ request ได้ทันทีโดยไม่ต้องรอ initialize ตอนเรียกใช้
+    # Startup: โหลด Models ทั้งหมดล่วงหน้า
     get_embedding_model()
     get_vectorstore()
     get_rag_chain()
+    get_query_condenser()
+    get_reranker()
     yield
 
 
 app = FastAPI(
     title="University RAG Microservice",
     description="AI Microservice สำหรับระบบถาม-ตอบหลักสูตรมหาวิทยาลัย (เรียกใช้งานผ่าน n8n)",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
 # Text Splitter สำหรับแบ่งเอกสาร PDF เป็น Chunks ขนาดเล็ก
-# chunk_overlap ช่วยให้บริบทระหว่าง Chunks ไม่ขาดหาย
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=settings.CHUNK_SIZE,
     chunk_overlap=settings.CHUNK_OVERLAP,
@@ -49,23 +51,18 @@ async def ingest_pdf(file: UploadFile = File(...)):
 
     tmp_path = None
     try:
-        # บันทึกไฟล์ PDF ลง temp เพื่อให้ PyPDFLoader อ่านได้
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
 
-        # โหลด PDF และแบ่งเป็น Chunks ด้วย RecursiveCharacterTextSplitter
-        # Loader จะแยกข้อความแต่ละหน้าพร้อม metadata (หมายเลขหน้า)
         loader = PyPDFLoader(tmp_path)
         documents = loader.load()
         chunks = text_splitter.split_documents(documents)
 
-        # เพิ่ม metadata ชื่อไฟล์ต้นฉบับ เพื่อใช้อ้างอิงแหล่งที่มาตอนตอบคำถาม
         for chunk in chunks:
             chunk.metadata["source_filename"] = file.filename
 
-        # แปลง Chunks เป็น Vectors (ผ่าน BGE-M3) แล้ว Upsert ลง Pinecone
         vectorstore = get_vectorstore()
         await vectorstore.aadd_documents(chunks)
 
@@ -83,20 +80,45 @@ async def ingest_pdf(file: UploadFile = File(...)):
             os.unlink(tmp_path)
 
 
+def _format_history(history: list[dict]) -> str:
+    """แปลงประวัติสนทนาเป็น string สำหรับใส่ใน prompt"""
+    if not history:
+        return "ไม่มีประวัติสนทนา"
+    lines = []
+    for turn in history:
+        lines.append(f"นักศึกษา: {turn['query']}")
+        lines.append(f"ผู้ช่วย: {turn['answer']}")
+    return "\n".join(lines)
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    หัวใจหลักของ RAG Pipeline - รับคำถามนักศึกษาแล้วตอบโดยอ้างอิงจากเอกสาร
-    ขั้นตอน: รับคำถาม -> ค้นหาบริบทจาก Pinecone -> ส่งให้ Claude สร้างคำตอบ
+    RAG Pipeline พร้อม Reranking และ Conversation Memory
+    ขั้นตอน: ดึงประวัติ -> Rewrite query -> ค้นหา -> Rerank -> สร้างคำตอบ -> บันทึกประวัติ
     """
     try:
         vectorstore = get_vectorstore()
         rag_chain = get_rag_chain()
 
-        # ค้นหา Chunks ที่มีความหมายใกล้เคียงกับคำถามมากที่สุดจาก Pinecone (Similarity Search)
-        # BGE-M3 จะแปลงคำถามเป็น Vector แล้วเทียบกับ Vectors ที่เก็บไว้
+        # --- 1. ดึงประวัติสนทนา (ถ้ามี user_id) ---
+        history = []
+        if request.user_id:
+            history = conversation_memory.get_history(request.user_id)
+
+        # --- 2. Rewrite query ถ้ามีประวัติสนทนา ---
+        # แปลงคำถามต่อเนื่อง เช่น "แล้วเรื่องนั้นล่ะ?" ให้เป็นคำถามสมบูรณ์
+        search_query = request.query
+        if history:
+            condenser = get_query_condenser()
+            search_query = await condenser.ainvoke({
+                "history": _format_history(history),
+                "query": request.query,
+            })
+
+        # --- 3. ค้นหา Chunks จาก Pinecone (ดึงมามากกว่าปกติเพื่อให้ Reranker คัดเลือก) ---
         relevant_docs = await vectorstore.asimilarity_search(
-            request.query, k=settings.TOP_K
+            search_query, k=settings.RETRIEVAL_K
         )
 
         if not relevant_docs:
@@ -105,18 +127,27 @@ async def chat(request: ChatRequest):
                 sources=[],
             )
 
-        # รวมเนื้อหาจาก Chunks ที่ค้นพบเป็นบริบท (Context) สำหรับส่งให้ LLM
-        context = "\n\n---\n\n".join(
-            [doc.page_content for doc in relevant_docs]
+        # --- 4. Rerank: ใช้ Cross-Encoder จัดลำดับความเกี่ยวข้องใหม่ ---
+        reranked_docs = rerank_documents(
+            search_query, relevant_docs, top_k=settings.TOP_K
         )
 
-        # ส่งบริบทและคำถามเข้า RAG Chain -> Claude สร้างคำตอบจากบริบทที่ให้เท่านั้น
+        # --- 5. สร้างคำตอบจาก Claude พร้อมบริบทและประวัติ ---
+        context = "\n\n---\n\n".join(
+            [doc.page_content for doc in reranked_docs]
+        )
+
         answer = await rag_chain.ainvoke({
             "context": context,
+            "history": _format_history(history),
             "query": request.query,
         })
 
-        # รวบรวม metadata ของ Chunks ที่ใช้อ้างอิง (หมายเลขหน้า, ชื่อไฟล์)
+        # --- 6. บันทึกประวัติสนทนา ---
+        if request.user_id:
+            conversation_memory.add_turn(request.user_id, request.query, answer)
+
+        # รวบรวม metadata ของ Chunks ที่ใช้อ้างอิง
         sources = [
             {
                 "page": doc.metadata.get("page", "N/A"),
@@ -124,7 +155,7 @@ async def chat(request: ChatRequest):
                     "source_filename", doc.metadata.get("source", "N/A")
                 ),
             }
-            for doc in relevant_docs
+            for doc in reranked_docs
         ]
 
         return ChatResponse(answer=answer, sources=sources)
