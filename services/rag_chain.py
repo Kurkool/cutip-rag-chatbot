@@ -6,7 +6,20 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from config import settings
 
+DEFAULT_PERSONA = (
+    "คุณคือผู้ช่วย AI ของมหาวิทยาลัย มีหน้าที่ตอบคำถามนักศึกษาอย่างถูกต้องและเป็นมิตร\n\n"
+    "กฎการตอบ:\n"
+    "1. ตอบเฉพาะจากข้อมูลในบริบท (Context) ที่ให้มาเท่านั้น ห้ามแต่งเติมหรือเดา\n"
+    "2. หากไม่พบคำตอบในบริบท ให้ตอบว่า \"ขออภัยค่ะ ไม่พบข้อมูลที่เกี่ยวข้องกับคำถามนี้ กรุณาติดต่อเจ้าหน้าที่โดยตรง\"\n"
+    "3. ถ้าคำถามเป็นภาษาไทย → ตอบภาษาไทย, ถ้าเป็นภาษาอังกฤษ → ตอบภาษาอังกฤษ\n"
+    "4. ตอบกระชับ ตรงประเด็น จัดรูปแบบให้อ่านง่าย ใช้ bullet points ตามเหมาะสม\n"
+    "5. ข้อมูลตัวเลข (ค่าเทอม, หน่วยกิต, GPA, วันที่) ต้องอ้างอิงจากบริบทเท่านั้น\n"
+    "6. ถ้ามีแหล่งอ้างอิง ให้ระบุชื่อเอกสารหรือหน้าที่ใช้\n"
+    "7. ใช้ประวัติสนทนาเพื่อเข้าใจบริบทของคำถามที่ต่อเนื่อง"
+)
 
+
+@lru_cache()
 def _get_llm() -> ChatAnthropic:
     return ChatAnthropic(
         model=settings.LLM_MODEL,
@@ -16,34 +29,23 @@ def _get_llm() -> ChatAnthropic:
     )
 
 
-@lru_cache()
-def get_rag_chain():
-    # RAG Chain หลัก: รับบริบท + ประวัติสนทนา + คำถาม แล้วสร้างคำตอบ
+def create_rag_chain(persona: str | None = None):
+    """สร้าง RAG Chain ด้วย persona เฉพาะ tenant (หรือใช้ default)"""
+    system_prompt = persona or DEFAULT_PERSONA
     prompt = ChatPromptTemplate.from_messages([
         ("system", (
-            "คุณคือผู้ช่วยด้านการศึกษาของมหาวิทยาลัย มีหน้าที่ตอบคำถามเกี่ยวกับหลักสูตรและเนื้อหาการเรียน\n\n"
-            "กฎสำคัญ:\n"
-            "1. ตอบคำถามโดยอ้างอิงจากบริบท (Context) ที่ให้มาเท่านั้น ห้ามแต่งเติมหรือใช้ความรู้ภายนอก\n"
-            "2. หากไม่พบคำตอบในบริบทที่ให้มา ให้ตอบว่า "
-            "\"ขออภัยครับ/ค่ะ ไม่พบข้อมูลที่เกี่ยวข้องกับคำถามนี้ในเอกสารที่มี "
-            "กรุณาติดต่อสอบถามอาจารย์หรือเจ้าหน้าที่โดยตรง\"\n"
-            "3. ตอบเป็นภาษาไทยที่สุภาพและเข้าใจง่าย\n"
-            "4. ถ้าเป็นไปได้ ให้อ้างอิงหมายเลขหน้าของเอกสารที่ใช้ในการตอบ\n"
-            "5. ใช้ประวัติสนทนาเพื่อเข้าใจบริบทของคำถามที่ต่อเนื่อง\n\n"
+            "{persona}\n\n"
             "ประวัติสนทนา:\n{history}\n\n"
             "บริบท:\n{context}"
         )),
         ("human", "{query}"),
     ])
-
-    llm = _get_llm()
-    return prompt | llm | StrOutputParser()
+    return prompt | _get_llm() | StrOutputParser(), system_prompt
 
 
 @lru_cache()
 def get_query_condenser():
-    # Query Condenser: แปลงคำถามต่อเนื่อง (follow-up) ให้เป็นคำถามที่สมบูรณ์ในตัวเอง
-    # เพื่อให้ค้นหาจาก Vector Store ได้แม่นยำขึ้น
+    """Query Condenser: แปลงคำถามต่อเนื่อง (follow-up) ให้เป็นคำถามที่สมบูรณ์ในตัวเอง"""
     prompt = ChatPromptTemplate.from_messages([
         ("system", (
             "จากประวัติสนทนาและคำถามล่าสุด ให้เขียนคำถามใหม่ที่สมบูรณ์ในตัวเอง "
@@ -57,6 +59,4 @@ def get_query_condenser():
             "คำถามที่สมบูรณ์:"
         )),
     ])
-
-    llm = _get_llm()
-    return prompt | llm | StrOutputParser()
+    return prompt | _get_llm() | StrOutputParser()

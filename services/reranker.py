@@ -1,31 +1,34 @@
+"""Cohere Rerank v3.5 for precision document reranking."""
+
 from functools import lru_cache
 
+import cohere
 from langchain_core.documents import Document
-from sentence_transformers import CrossEncoder
 
 from config import settings
 
 
 @lru_cache()
-def get_reranker() -> CrossEncoder:
-    # โหลด Cross-Encoder สำหรับ Reranking เพื่อจัดลำดับความเกี่ยวข้องของ Chunks ใหม่
-    return CrossEncoder(settings.RERANKER_MODEL)
+def _get_client() -> cohere.Client:
+    return cohere.Client(api_key=settings.COHERE_API_KEY)
+
+
+def get_reranker():
+    """Warm up Cohere client on startup."""
+    _get_client()
 
 
 def rerank_documents(
     query: str, documents: list[Document], top_k: int
 ) -> list[Document]:
-    """
-    รับ Chunks ที่ได้จาก Vector Search แล้วใช้ Cross-Encoder ให้คะแนนความเกี่ยวข้องใหม่
-    Cross-Encoder แม่นยำกว่า Bi-Encoder (Embedding) เพราะเปรียบเทียบ query กับ document พร้อมกัน
-    """
+    """Re-score documents by relevance using Cohere cross-encoder."""
     if not documents:
         return documents
 
-    pairs = [[query, doc.page_content] for doc in documents]
-    scores = get_reranker().predict(pairs)
-
-    scored_docs = sorted(
-        zip(scores, documents), key=lambda x: x[0], reverse=True
+    response = _get_client().rerank(
+        model=settings.RERANKER_MODEL,
+        query=query,
+        documents=[doc.page_content for doc in documents],
+        top_n=top_k,
     )
-    return [doc for _, doc in scored_docs[:top_k]]
+    return [documents[r.index] for r in response.results]
