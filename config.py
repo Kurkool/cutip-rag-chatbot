@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Models
     EMBEDDING_MODEL: str = "embed-v4.0"
     RERANKER_MODEL: str = "rerank-v3.5"
-    LLM_MODEL: str = "claude-sonnet-4-6"
+    LLM_MODEL: str = "claude-opus-4-6"
 
     # Chunking
     CHUNK_SIZE: int = 800

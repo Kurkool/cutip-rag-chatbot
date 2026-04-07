@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import tempfile
 from typing import Any
@@ -6,6 +7,7 @@ from typing import Any
 import pandas as pd
 import pymupdf4llm
 from docx import Document as DocxDocument
+from langchain_anthropic import ChatAnthropic
 from langchain_core.documents import Document
 from langchain_text_splitters import (
     MarkdownHeaderTextSplitter,
@@ -14,6 +16,8 @@ from langchain_text_splitters import (
 
 from config import settings
 from services.vectorstore import get_vectorstore
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────
 # Smart Chunking Pipeline
@@ -172,13 +176,12 @@ async def ingest_pdf(
         avg_chars = sum(len(p["text"]) for p in pages) / max(len(pages), 1)
         is_slides = len(pages) > 5 and avg_chars < 400
 
+        full_text = "\n\n".join(p["text"] for p in pages)
+
         if is_slides:
             chunks = _smart_chunk_pages(pages, source=filename)
         else:
-            # Combine all pages into single markdown, then smart-chunk
-            full_text = "\n\n".join(p["text"] for p in pages)
             chunks = _smart_chunk(full_text, source=filename)
-            # Add page numbers from original pages
             for chunk in chunks:
                 if "page" not in chunk.metadata:
                     chunk.metadata["page"] = 1
@@ -186,7 +189,7 @@ async def ingest_pdf(
         metadata = _build_metadata(
             tenant_id, "pdf", filename, doc_category, url, download_link
         )
-        return await _upsert(chunks, namespace, metadata)
+        return await _upsert(chunks, namespace, metadata, full_text=full_text)
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -212,7 +215,7 @@ async def ingest_docx(
     metadata = _build_metadata(
         tenant_id, "docx", filename, doc_category, url, download_link
     )
-    return await _upsert(chunks, namespace, metadata)
+    return await _upsert(chunks, namespace, metadata, full_text=full_text)
 
 
 async def ingest_markdown(
@@ -230,7 +233,7 @@ async def ingest_markdown(
     metadata = _build_metadata(
         tenant_id, "web", source_name, doc_category, url, download_link
     )
-    return await _upsert(chunks, namespace, metadata)
+    return await _upsert(chunks, namespace, metadata, full_text=content)
 
 
 async def ingest_spreadsheet(
@@ -256,7 +259,7 @@ async def ingest_spreadsheet(
         metadata = _build_metadata(
             tenant_id, "spreadsheet", filename, doc_category, url, download_link
         )
-        total_chunks = await _upsert(chunks, namespace, metadata)
+        total_chunks = await _upsert(chunks, namespace, metadata, full_text=md_table)
         return 1, total_chunks
 
     # XLSX: process each sheet
@@ -272,7 +275,7 @@ async def ingest_spreadsheet(
         metadata = _build_metadata(
             tenant_id, "spreadsheet", filename, doc_category, url, download_link
         )
-        total_chunks += await _upsert(chunks, namespace, metadata)
+        total_chunks += await _upsert(chunks, namespace, metadata, full_text=md_table)
         sheets_processed += 1
 
     return sheets_processed, total_chunks
@@ -292,6 +295,52 @@ def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ──────────────────────────────────────
+# Contextual Retrieval (Anthropic Research)
+# ──────────────────────────────────────
+
+_CONTEXT_PROMPT = (
+    "Here is the full document:\n<document>\n{document}\n</document>\n\n"
+    "Here is a specific chunk from that document:\n<chunk>\n{chunk}\n</chunk>\n\n"
+    "Write a short 1-2 sentence context in the SAME LANGUAGE as the document "
+    "that explains where this chunk fits within the document. "
+    "Include the document topic, section name, and what this chunk is about. "
+    "Reply with ONLY the context, nothing else."
+)
+
+
+async def _enrich_with_context(
+    chunks: list[Document], full_text: str
+) -> list[Document]:
+    """
+    Contextual Retrieval: ask Claude to generate a short context for each chunk,
+    then prepend it. This dramatically improves search relevance (~49% per Anthropic).
+    """
+    if not chunks:
+        return chunks
+
+    # Truncate full document to avoid token limits (keep first 6000 chars)
+    doc_summary = full_text[:6000]
+
+    llm = ChatAnthropic(
+        model="claude-haiku-4-5-20251001",  # Fast + cheap for context generation
+        anthropic_api_key=settings.ANTHROPIC_API_KEY,
+        temperature=0,
+        max_tokens=150,
+    )
+
+    for chunk in chunks:
+        try:
+            context = await llm.ainvoke(
+                _CONTEXT_PROMPT.format(document=doc_summary, chunk=chunk.page_content)
+            )
+            chunk.page_content = f"[{context.content.strip()}]\n{chunk.page_content}"
+        except Exception:
+            logger.warning("Failed to generate context for chunk, skipping enrichment")
+
+    return chunks
+
+
+# ──────────────────────────────────────
 # Common: Attach metadata + Upsert
 # ──────────────────────────────────────
 
@@ -299,8 +348,13 @@ async def _upsert(
     chunks: list[Document],
     namespace: str,
     extra_metadata: dict[str, Any],
+    full_text: str = "",
 ) -> int:
-    """Attach metadata to all chunks, then upsert to Pinecone namespace"""
+    """Enrich chunks with contextual retrieval, attach metadata, upsert to Pinecone."""
+    # Contextual Retrieval: prepend document context to each chunk
+    if full_text:
+        chunks = await _enrich_with_context(chunks, full_text)
+
     for chunk in chunks:
         chunk.metadata.update(extra_metadata)
 

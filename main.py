@@ -8,7 +8,6 @@ from fastapi.security import APIKeyHeader
 from config import settings
 from routers import analytics_router, ingestion_router, tenants_router, webhook_router
 from services.embedding import get_embedding_model
-from services.rag_chain import get_query_condenser
 from services.reranker import get_reranker
 from services.vectorstore import get_vectorstore
 
@@ -34,7 +33,6 @@ async def verify_api_key(api_key: str = Security(_api_key_header)):
 async def lifespan(app: FastAPI):
     get_embedding_model()
     get_vectorstore()
-    get_query_condenser()
     get_reranker()
     yield
 
