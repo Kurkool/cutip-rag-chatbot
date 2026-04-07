@@ -8,6 +8,7 @@ langchain-community>=0.3.0
 langchain-anthropic>=0.3.0
 langchain-cohere>=0.4.0
 langchain-pinecone>=0.2.0
+langgraph>=0.3.0
 pinecone-client>=5.0.0
 cohere>=5.0.0
 # Document parsing
