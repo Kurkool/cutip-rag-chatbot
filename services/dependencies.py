@@ -30,6 +30,25 @@ def parse_file_extension(filename: str) -> str:
     return ext.lower()
 
 
+def fix_filename(filename: str) -> str:
+    """Fix Thai filenames garbled by Windows curl (TIS-620 → Latin-1 mojibake).
+
+    curl on Windows sends Thai filenames in system encoding (CP874/TIS-620),
+    but FastAPI reads them as Latin-1, producing mojibake like 'ÊÍºâ¤Ã§...'
+    This function detects and repairs the encoding.
+    """
+    try:
+        # Check if the filename contains Latin-1 chars that look like TIS-620 mojibake
+        raw = filename.encode("latin-1")
+        decoded = raw.decode("tis-620")
+        # If decoding succeeds and produces Thai chars, it was mojibake
+        if any("\u0e00" <= c <= "\u0e7f" for c in decoded):
+            return decoded
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass
+    return filename
+
+
 # ──────────────────────────────────────
 # Conversation history
 # ──────────────────────────────────────

@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from schemas import IngestMarkdownRequest, IngestResponse, IngestSpreadsheetResponse
 from services import ingestion as ingestion_service
-from services.dependencies import get_tenant_or_404, parse_file_extension
+from services.dependencies import fix_filename, get_tenant_or_404, parse_file_extension
 
 router = APIRouter(prefix="/api/tenants/{tenant_id}/ingest", tags=["Ingestion"])
 
@@ -22,7 +22,7 @@ async def ingest_document(
 ):
     """Ingest PDF / DOC / DOCX with metadata (called by n8n or admin)."""
     tenant = await get_tenant_or_404(tenant_id)
-    filename = file.filename or "unknown"
+    filename = fix_filename(file.filename or "unknown")
     ext = parse_file_extension(filename)
 
     if ext not in ALLOWED_DOC_EXTENSIONS:
@@ -87,7 +87,7 @@ async def ingest_spreadsheet(
 ):
     """Ingest XLSX / CSV → Markdown tables."""
     tenant = await get_tenant_or_404(tenant_id)
-    filename = file.filename or "unknown"
+    filename = fix_filename(file.filename or "unknown")
     ext = parse_file_extension(filename)
 
     if ext not in ALLOWED_SHEET_EXTENSIONS:

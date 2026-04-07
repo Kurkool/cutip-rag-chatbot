@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import re
 import tempfile
 from typing import Any
 
@@ -344,19 +345,25 @@ async def _enrich_with_context(
 # Common: Attach metadata + Upsert
 # ──────────────────────────────────────
 
+_URL_PATTERN = re.compile(r'https?://[^\s\)\]\>"\']+')
+
+
 async def _upsert(
     chunks: list[Document],
     namespace: str,
     extra_metadata: dict[str, Any],
     full_text: str = "",
 ) -> int:
-    """Enrich chunks with contextual retrieval, attach metadata, upsert to Pinecone."""
-    # Contextual Retrieval: prepend document context to each chunk
+    """Enrich chunks with contextual retrieval, extract URLs, attach metadata, upsert."""
     if full_text:
         chunks = await _enrich_with_context(chunks, full_text)
 
     for chunk in chunks:
         chunk.metadata.update(extra_metadata)
+        # Extract URLs found in this chunk for the agent to follow later
+        urls = _URL_PATTERN.findall(chunk.page_content)
+        if urls:
+            chunk.metadata["urls"] = urls
 
     vectorstore = get_vectorstore(namespace)
     await vectorstore.aadd_documents(chunks)

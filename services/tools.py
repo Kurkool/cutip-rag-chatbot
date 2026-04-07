@@ -1,5 +1,6 @@
 """Tenant-scoped tools for the agentic chatbot."""
 
+import httpx
 from langchain_core.tools import tool
 
 from services.reranker import rerank_documents
@@ -54,7 +55,23 @@ def create_tools(namespace: str) -> list:
         except Exception as e:
             return f"Calculation error: {e}"
 
-    return [search_knowledge_base, search_by_category, calculate]
+    @tool
+    def fetch_webpage(url: str) -> str:
+        """Fetch and read a web page as text. Use when search results contain
+        a URL or link that might have additional relevant information.
+        Also useful for checking referenced documents, forms, or announcements."""
+        try:
+            response = httpx.get(
+                f"https://r.jina.ai/{url}",
+                timeout=15,
+                headers={"Accept": "text/plain"},
+            )
+            response.raise_for_status()
+            return response.text[:3000]
+        except Exception as e:
+            return f"Failed to fetch {url}: {e}"
+
+    return [search_knowledge_base, search_by_category, calculate, fetch_webpage]
 
 
 def _format_results(docs: list) -> str:
