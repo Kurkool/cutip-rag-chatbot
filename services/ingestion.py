@@ -106,10 +106,11 @@ def _delete_existing_vectors(namespace: str, source_filename: str):
 
 
 # ──────────────────────────────────────
-# PDF Ingestion (Vision-first, batch processing)
+# PDF Ingestion (Hybrid: text extraction + Vision fallback)
 # ──────────────────────────────────────
 
-_PDF_BATCH_SIZE = 5  # Process 5 pages concurrently to avoid rate limits
+_VISION_THRESHOLD = 100  # Pages with < 100 chars text → use Vision
+_PDF_BATCH_SIZE = 5
 
 
 async def ingest_pdf(
@@ -122,11 +123,12 @@ async def ingest_pdf(
     download_link: str = "",
 ) -> int:
     """
-    PDF → render each page as image → Claude Vision (batched)
-    → structured markdown → smart chunk → contextual retrieval → embed
+    Hybrid PDF ingestion:
+    - Pages with enough text → PyMuPDF text extraction (fast, free)
+    - Pages with little/no text (tables, forms, scanned) → Claude Vision (accurate)
+    - Hidden hyperlinks extracted from all pages
 
     Handles: text, forms, slides, scanned, tables, diagrams, hidden hyperlinks.
-    Batches Vision calls to avoid rate limits and timeouts.
     """
     _delete_existing_vectors(namespace, filename)
 
@@ -141,28 +143,50 @@ async def ingest_pdf(
             logger.error("Password-protected PDF: %s", filename)
             return 0
 
-        # Prepare all pages
+        # Phase 1: Extract text + classify each page
         pages_data = []
+        vision_pages = []
         for i, page in enumerate(doc):
-            pix = page.get_pixmap(dpi=150)
-            img_bytes = pix.tobytes("png")
+            text = page.get_text("text").strip()
             hidden_links = _extract_hyperlinks(page)
-            pages_data.append({
-                "img_bytes": img_bytes,
-                "links": hidden_links,
-                "page_num": i + 1,
-            })
+            page_num = i + 1
+
+            # Has tables? (PyMuPDF can detect table structures)
+            has_tables = bool(page.find_tables().tables)
+
+            if len(text) >= _VISION_THRESHOLD and not has_tables:
+                # Enough text, no tables → use text extraction (fast)
+                if hidden_links:
+                    text += "\n\n**Links in this page:**\n" + "\n".join(
+                        f"- [{t}]({u})" for t, u in hidden_links
+                    )
+                pages_data.append({"text": text, "page": page_num})
+            else:
+                # Low text or has tables → need Vision
+                pix = page.get_pixmap(dpi=150)
+                vision_pages.append({
+                    "img_bytes": pix.tobytes("png"),
+                    "links": hidden_links,
+                    "page_num": page_num,
+                })
         doc.close()
 
-        # Process pages in batches (concurrent within batch, sequential between batches)
-        page_texts = []
-        for batch_start in range(0, len(pages_data), _PDF_BATCH_SIZE):
-            batch = pages_data[batch_start:batch_start + _PDF_BATCH_SIZE]
+        # Phase 2: Process Vision pages in batches
+        logger.info(
+            "%s: %d text pages, %d vision pages",
+            filename, len(pages_data), len(vision_pages),
+        )
+        for batch_start in range(0, len(vision_pages), _PDF_BATCH_SIZE):
+            batch = vision_pages[batch_start:batch_start + _PDF_BATCH_SIZE]
             tasks = [_process_pdf_page(p) for p in batch]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             for result in results:
                 if isinstance(result, dict) and result.get("text"):
-                    page_texts.append(result)
+                    pages_data.append(result)
+
+        # Sort by page number
+        pages_data.sort(key=lambda p: p["page"])
+        page_texts = pages_data
 
         if not page_texts:
             return 0
