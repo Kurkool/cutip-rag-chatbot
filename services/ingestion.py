@@ -1,3 +1,6 @@
+"""God-mode document ingestion: Vision-first, handles every edge case."""
+
+import asyncio
 import io
 import logging
 import os
@@ -6,7 +9,7 @@ import tempfile
 from typing import Any
 
 import pandas as pd
-import pymupdf4llm
+import pymupdf
 from docx import Document as DocxDocument
 from langchain_anthropic import ChatAnthropic
 from langchain_core.documents import Document
@@ -16,7 +19,8 @@ from langchain_text_splitters import (
 )
 
 from config import settings
-from services.vectorstore import get_vectorstore
+from services.vectorstore import get_raw_index, get_vectorstore
+from services.vision import interpret_spreadsheet, parse_page_image
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +28,6 @@ logger = logging.getLogger(__name__)
 # Smart Chunking Pipeline
 # ──────────────────────────────────────
 
-# Step 1: Split markdown by headers (preserves document structure)
 md_header_splitter = MarkdownHeaderTextSplitter(
     headers_to_split_on=[
         ("#", "section"),
@@ -34,7 +37,6 @@ md_header_splitter = MarkdownHeaderTextSplitter(
     strip_headers=False,
 )
 
-# Step 2: Split large sections into smaller chunks
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=settings.CHUNK_SIZE,
     chunk_overlap=settings.CHUNK_OVERLAP,
@@ -43,25 +45,14 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 
 def _smart_chunk(text: str, source: str = "") -> list[Document]:
-    """
-    Smart chunking pipeline:
-    1. MarkdownHeaderTextSplitter → split by document structure (H1/H2/H3)
-    2. RecursiveCharacterTextSplitter → split large sections
-    3. Context enrichment → prepend section headers to each chunk
-    """
-    # Step 1: Split by headers
+    """MarkdownHeader split → Recursive split → context enrichment."""
     header_chunks = md_header_splitter.split_text(text)
-
     if not header_chunks:
-        # Fallback: no headers found, use plain recursive splitting
         return text_splitter.create_documents(
             [text], metadatas=[{"source": source}]
         )
 
-    # Step 2: Split large sections
     final_chunks = text_splitter.split_documents(header_chunks)
-
-    # Step 3: Context enrichment - prepend section path to each chunk
     for chunk in final_chunks:
         header_path = " > ".join(
             chunk.metadata[key]
@@ -71,59 +62,11 @@ def _smart_chunk(text: str, source: str = "") -> list[Document]:
         if header_path and not chunk.page_content.startswith(header_path):
             chunk.page_content = f"[{header_path}]\n{chunk.page_content}"
         chunk.metadata["source"] = source
-
     return final_chunks
 
 
-def _smart_chunk_pages(pages: list[dict], source: str = "") -> list[Document]:
-    """
-    Page-aware chunking for slides/presentations:
-    - Merge consecutive short pages (< 100 chars)
-    - Keep each meaningful page as its own chunk
-    """
-    chunks: list[Document] = []
-    buffer = ""
-    buffer_pages: list[int] = []
-
-    for page in pages:
-        text = page["text"].strip()
-        page_num = page["page"]
-
-        if not text:
-            continue
-
-        if len(text) < 100:
-            # Short page → accumulate in buffer
-            buffer += f"\n{text}" if buffer else text
-            buffer_pages.append(page_num)
-        else:
-            # Flush buffer first
-            if buffer:
-                chunks.append(Document(
-                    page_content=buffer,
-                    metadata={"source": source, "pages": buffer_pages},
-                ))
-                buffer = ""
-                buffer_pages = []
-
-            # Process this page with smart chunking
-            page_chunks = _smart_chunk(text, source)
-            for c in page_chunks:
-                c.metadata["page"] = page_num
-            chunks.extend(page_chunks)
-
-    # Flush remaining buffer
-    if buffer:
-        chunks.append(Document(
-            page_content=buffer,
-            metadata={"source": source, "pages": buffer_pages},
-        ))
-
-    return chunks
-
-
 # ──────────────────────────────────────
-# Metadata Builder
+# Metadata
 # ──────────────────────────────────────
 
 def _build_metadata(
@@ -145,8 +88,29 @@ def _build_metadata(
 
 
 # ──────────────────────────────────────
-# Ingestion Functions
+# Duplicate Detection: delete old vectors before re-ingest
 # ──────────────────────────────────────
+
+def _delete_existing_vectors(namespace: str, source_filename: str):
+    """Delete all vectors with matching source_filename in the namespace."""
+    try:
+        index = get_raw_index()
+        # Pinecone: delete by metadata filter
+        index.delete(
+            filter={"source_filename": source_filename},
+            namespace=namespace,
+        )
+        logger.info("Deleted old vectors for '%s' in namespace '%s'", source_filename, namespace)
+    except Exception:
+        logger.warning("Could not delete old vectors for '%s' (may not exist)", source_filename)
+
+
+# ──────────────────────────────────────
+# PDF Ingestion (Vision-first, batch processing)
+# ──────────────────────────────────────
+
+_PDF_BATCH_SIZE = 5  # Process 5 pages concurrently to avoid rate limits
+
 
 async def ingest_pdf(
     file_bytes: bytes,
@@ -158,29 +122,59 @@ async def ingest_pdf(
     download_link: str = "",
 ) -> int:
     """
-    PyMuPDF4LLM: PDF → clean Markdown (Thai/English perfect)
-    → Smart chunking → Cohere embed-v4 → Pinecone
+    PDF → render each page as image → Claude Vision (batched)
+    → structured markdown → smart chunk → contextual retrieval → embed
+
+    Handles: text, forms, slides, scanned, tables, diagrams, hidden hyperlinks.
+    Batches Vision calls to avoid rate limits and timeouts.
     """
+    _delete_existing_vectors(namespace, filename)
+
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(file_bytes)
             tmp_path = tmp.name
 
-        # PyMuPDF4LLM: outputs markdown with table support
-        pages = pymupdf4llm.to_markdown(
-            tmp_path,
-            page_chunks=True,  # return list of pages
-        )
+        doc = pymupdf.open(tmp_path)
+        if doc.is_encrypted:
+            logger.error("Password-protected PDF: %s", filename)
+            return 0
 
-        # Detect: is this a slide deck (many short pages) or a document?
-        avg_chars = sum(len(p["text"]) for p in pages) / max(len(pages), 1)
-        is_slides = len(pages) > 5 and avg_chars < 400
+        # Prepare all pages
+        pages_data = []
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(dpi=150)
+            img_bytes = pix.tobytes("png")
+            hidden_links = _extract_hyperlinks(page)
+            pages_data.append({
+                "img_bytes": img_bytes,
+                "links": hidden_links,
+                "page_num": i + 1,
+            })
+        doc.close()
 
-        full_text = "\n\n".join(p["text"] for p in pages)
+        # Process pages in batches (concurrent within batch, sequential between batches)
+        page_texts = []
+        for batch_start in range(0, len(pages_data), _PDF_BATCH_SIZE):
+            batch = pages_data[batch_start:batch_start + _PDF_BATCH_SIZE]
+            tasks = [_process_pdf_page(p) for p in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, dict) and result.get("text"):
+                    page_texts.append(result)
+
+        if not page_texts:
+            return 0
+
+        full_text = "\n\n---\n\n".join(p["text"] for p in page_texts)
+
+        # Detect slides vs document
+        avg_chars = len(full_text) / max(len(page_texts), 1)
+        is_slides = len(page_texts) > 5 and avg_chars < 500
 
         if is_slides:
-            chunks = _smart_chunk_pages(pages, source=filename)
+            chunks = _chunk_pages(page_texts, source=filename)
         else:
             chunks = _smart_chunk(full_text, source=filename)
             for chunk in chunks:
@@ -196,6 +190,72 @@ async def ingest_pdf(
             os.unlink(tmp_path)
 
 
+async def _process_pdf_page(page_data: dict) -> dict:
+    """Process a single PDF page: Vision + hyperlinks."""
+    try:
+        markdown = await parse_page_image(page_data["img_bytes"])
+        if page_data["links"]:
+            markdown += "\n\n**Links in this page:**\n" + "\n".join(
+                f"- [{text}]({uri})" for text, uri in page_data["links"]
+            )
+        return {"text": markdown, "page": page_data["page_num"]}
+    except Exception:
+        logger.warning("Failed to process page %d", page_data["page_num"])
+        return {"text": "", "page": page_data["page_num"]}
+
+
+def _extract_hyperlinks(page) -> list[tuple[str, str]]:
+    """Extract hidden hyperlinks from a PDF page (not visible as text)."""
+    page_text = page.get_text("text")
+    links = []
+    for link in page.get_links():
+        uri = link.get("uri", "")
+        if not uri or uri in page_text:
+            continue  # Skip if URI is already visible in text
+        rect = link.get("from", pymupdf.Rect())
+        text = page.get_text("text", clip=rect).strip() or uri
+        links.append((text, uri))
+    return links
+
+
+def _chunk_pages(pages: list[dict], source: str = "") -> list[Document]:
+    """Page-level chunking for slides: merge short pages."""
+    chunks: list[Document] = []
+    buffer = ""
+    buffer_pages: list[int] = []
+
+    for page in pages:
+        text = page["text"].strip()
+        if not text:
+            continue
+        if len(text) < 100:
+            buffer += f"\n{text}" if buffer else text
+            buffer_pages.append(page["page"])
+        else:
+            if buffer:
+                chunks.append(Document(
+                    page_content=buffer,
+                    metadata={"source": source, "pages": buffer_pages},
+                ))
+                buffer = ""
+                buffer_pages = []
+            page_chunks = _smart_chunk(text, source)
+            for c in page_chunks:
+                c.metadata["page"] = page["page"]
+            chunks.extend(page_chunks)
+
+    if buffer:
+        chunks.append(Document(
+            page_content=buffer,
+            metadata={"source": source, "pages": buffer_pages},
+        ))
+    return chunks
+
+
+# ──────────────────────────────────────
+# DOCX Ingestion (paragraphs + tables + images)
+# ──────────────────────────────────────
+
 async def ingest_docx(
     file_bytes: bytes,
     filename: str,
@@ -205,19 +265,78 @@ async def ingest_docx(
     url: str = "",
     download_link: str = "",
 ) -> int:
-    """Parse DOCX → smart chunk → embed → upsert"""
+    """
+    DOCX → extract paragraphs + tables + images → combined markdown → chunk → embed.
+    No more missing tables or images.
+    """
+    _delete_existing_vectors(namespace, filename)
+
     doc = DocxDocument(io.BytesIO(file_bytes))
 
-    # Extract text preserving paragraph structure
-    paragraphs = [para.text for para in doc.paragraphs if para.text.strip()]
-    full_text = "\n\n".join(paragraphs)
+    parts = []
 
+    # 1. Extract paragraphs
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            # Detect heading styles
+            if para.style and para.style.name.startswith("Heading"):
+                level = para.style.name.replace("Heading ", "")
+                try:
+                    hashes = "#" * int(level)
+                except ValueError:
+                    hashes = "##"
+                parts.append(f"{hashes} {text}")
+            else:
+                parts.append(text)
+
+    # 2. Extract tables → markdown tables
+    for table in doc.tables:
+        md_table = _docx_table_to_markdown(table)
+        if md_table:
+            parts.append(md_table)
+
+    # 3. Extract images → Claude Vision
+    for rel in doc.part.rels.values():
+        if "image" in rel.reltype:
+            try:
+                img_bytes = rel.target_part.blob
+                caption = await parse_page_image(img_bytes)
+                if caption:
+                    parts.append(f"[Image content: {caption}]")
+            except Exception:
+                pass
+
+    full_text = "\n\n".join(parts)
     chunks = _smart_chunk(full_text, source=filename)
     metadata = _build_metadata(
         tenant_id, "docx", filename, doc_category, url, download_link
     )
     return await _upsert(chunks, namespace, metadata, full_text=full_text)
 
+
+def _docx_table_to_markdown(table) -> str:
+    """Convert a python-docx table to markdown table."""
+    rows = []
+    for row in table.rows:
+        cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+        rows.append(cells)
+
+    if not rows:
+        return ""
+
+    # First row as header
+    header = "| " + " | ".join(rows[0]) + " |"
+    separator = "| " + " | ".join("---" for _ in rows[0]) + " |"
+    body = "\n".join(
+        "| " + " | ".join(row) + " |" for row in rows[1:]
+    )
+    return f"{header}\n{separator}\n{body}"
+
+
+# ──────────────────────────────────────
+# Markdown Ingestion (web content)
+# ──────────────────────────────────────
 
 async def ingest_markdown(
     content: str,
@@ -228,13 +347,22 @@ async def ingest_markdown(
     url: str = "",
     download_link: str = "",
 ) -> int:
-    """Ingest Markdown content (from Jina Reader) → smart chunk → embed → upsert"""
+    """Markdown content (from Jina Reader) → smart chunk → embed."""
     source_name = title or url or "web_content"
+    _delete_existing_vectors(namespace, source_name)
+
     chunks = _smart_chunk(content, source=source_name)
     metadata = _build_metadata(
         tenant_id, "web", source_name, doc_category, url, download_link
     )
     return await _upsert(chunks, namespace, metadata, full_text=content)
+
+
+# ──────────────────────────────────────
+# Spreadsheet Ingestion (Claude interprets, batched for large sheets)
+# ──────────────────────────────────────
+
+_XLSX_BATCH_ROWS = 100  # Send 100 rows at a time to Claude
 
 
 async def ingest_spreadsheet(
@@ -247,52 +375,75 @@ async def ingest_spreadsheet(
     download_link: str = "",
 ) -> tuple[int, int]:
     """
-    XLSX/CSV → Clean merged cells → Markdown tables → chunk → embed → upsert
+    XLSX/CSV → raw dump → Claude interprets (batched for large sheets)
+    → markdown → chunk → embed.
     """
+    _delete_existing_vectors(namespace, filename)
+
     is_csv = filename.lower().endswith(".csv")
     total_chunks = 0
 
     if is_csv:
-        df = pd.read_csv(io.BytesIO(file_bytes))
-        df = _clean_dataframe(df)
-        md_table = df.to_markdown(index=False)
-        chunks = _smart_chunk(md_table, source=filename)
+        df = pd.read_csv(io.BytesIO(file_bytes), header=None)
+        structured = await _interpret_dataframe(df)
+        chunks = _smart_chunk(structured, source=filename)
         metadata = _build_metadata(
             tenant_id, "spreadsheet", filename, doc_category, url, download_link
         )
-        total_chunks = await _upsert(chunks, namespace, metadata, full_text=md_table)
+        total_chunks = await _upsert(chunks, namespace, metadata, full_text=structured)
         return 1, total_chunks
 
-    # XLSX: process each sheet
     xls = pd.ExcelFile(io.BytesIO(file_bytes))
     sheets_processed = 0
     for sheet_name in xls.sheet_names:
-        df = xls.parse(sheet_name)
-        df = _clean_dataframe(df)
-        if df.empty:
+        df = xls.parse(sheet_name, header=None)
+        if df.dropna(how="all").empty:
             continue
-        md_table = f"## {sheet_name}\n\n{df.to_markdown(index=False)}"
-        chunks = _smart_chunk(md_table, source=f"{filename} - {sheet_name}")
+        structured = await _interpret_dataframe(df, sheet_name=sheet_name)
+        chunks = _smart_chunk(structured, source=f"{filename} - {sheet_name}")
         metadata = _build_metadata(
             tenant_id, "spreadsheet", filename, doc_category, url, download_link
         )
-        total_chunks += await _upsert(chunks, namespace, metadata, full_text=md_table)
+        total_chunks += await _upsert(chunks, namespace, metadata, full_text=structured)
         sheets_processed += 1
 
     return sheets_processed, total_chunks
 
 
-def _clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Clean messy spreadsheets: drop empty rows/cols, forward-fill merged cells"""
-    df = df.dropna(how="all")  # drop fully empty rows
-    df = df.dropna(axis=1, how="all")  # drop fully empty columns
-    df = df.ffill()  # forward-fill merged cells
-    # Clean column names
-    df.columns = [
-        str(c).strip() if not str(c).startswith("Unnamed") else ""
-        for c in df.columns
-    ]
-    return df
+async def _interpret_dataframe(df: pd.DataFrame, sheet_name: str = "") -> str:
+    """Send DataFrame to Claude in batches for large sheets."""
+    df_clean = df.dropna(how="all").dropna(axis=1, how="all")
+    total_rows = len(df_clean)
+
+    if total_rows <= _XLSX_BATCH_ROWS:
+        # Small sheet: send all at once
+        raw = _raw_dataframe_dump(df_clean)
+        prefix = f"Sheet: {sheet_name}\n\n" if sheet_name else ""
+        return await interpret_spreadsheet(f"{prefix}{raw}")
+
+    # Large sheet: process in batches
+    parts = []
+    for start in range(0, total_rows, _XLSX_BATCH_ROWS):
+        batch = df_clean.iloc[start:start + _XLSX_BATCH_ROWS]
+        raw = _raw_dataframe_dump(batch)
+        prefix = f"Sheet: {sheet_name} (rows {start+1}-{start+len(batch)})\n\n"
+        interpreted = await interpret_spreadsheet(f"{prefix}{raw}")
+        parts.append(interpreted)
+
+    return "\n\n".join(parts)
+
+
+def _raw_dataframe_dump(df: pd.DataFrame) -> str:
+    """Dump raw cell data as readable text for Claude to interpret."""
+    lines = []
+    for i, row in df.iterrows():
+        values = []
+        for j, val in enumerate(row):
+            if pd.notna(val):
+                values.append(f"[{j}]={val}")
+        if values:
+            lines.append(f"Row {i}: {' | '.join(values)}")
+    return "\n".join(lines)
 
 
 # ──────────────────────────────────────
@@ -312,18 +463,18 @@ _CONTEXT_PROMPT = (
 async def _enrich_with_context(
     chunks: list[Document], full_text: str
 ) -> list[Document]:
-    """
-    Contextual Retrieval: ask Claude to generate a short context for each chunk,
-    then prepend it. This dramatically improves search relevance (~49% per Anthropic).
-    """
+    """Prepend document-level context to each chunk (~49% retrieval improvement)."""
     if not chunks:
         return chunks
 
-    # Truncate full document to avoid token limits (keep first 6000 chars)
-    doc_summary = full_text[:6000]
+    # Use beginning + end of doc for better context coverage on long documents
+    if len(full_text) > 6000:
+        doc_summary = full_text[:4000] + "\n...\n" + full_text[-2000:]
+    else:
+        doc_summary = full_text
 
     llm = ChatAnthropic(
-        model="claude-haiku-4-5-20251001",  # Fast + cheap for context generation
+        model="claude-haiku-4-5-20251001",
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
         temperature=0,
         max_tokens=150,
@@ -336,13 +487,13 @@ async def _enrich_with_context(
             )
             chunk.page_content = f"[{context.content.strip()}]\n{chunk.page_content}"
         except Exception:
-            logger.warning("Failed to generate context for chunk, skipping enrichment")
+            logger.warning("Failed to generate context for chunk, skipping")
 
     return chunks
 
 
 # ──────────────────────────────────────
-# Common: Attach metadata + Upsert
+# Common: URL extraction + metadata + upsert
 # ──────────────────────────────────────
 
 _URL_PATTERN = re.compile(r'https?://[^\s\)\]\>"\']+')
@@ -354,13 +505,12 @@ async def _upsert(
     extra_metadata: dict[str, Any],
     full_text: str = "",
 ) -> int:
-    """Enrich chunks with contextual retrieval, extract URLs, attach metadata, upsert."""
+    """Contextual retrieval → URL extraction → metadata → upsert to Pinecone."""
     if full_text:
         chunks = await _enrich_with_context(chunks, full_text)
 
     for chunk in chunks:
         chunk.metadata.update(extra_metadata)
-        # Extract URLs found in this chunk for the agent to follow later
         urls = _URL_PATTERN.findall(chunk.page_content)
         if urls:
             chunk.metadata["urls"] = urls

@@ -27,6 +27,11 @@ async def line_webhook(request: Request):
     body = await request.body()
     signature = request.headers.get("X-Line-Signature", "")
     payload = _parse_payload(body)
+
+    # LINE verification: empty events or no destination = just return 200
+    if not payload.get("destination") or not payload.get("events"):
+        return {"status": "ok"}
+
     tenant = await _identify_tenant(payload)
     _verify_request(body, signature, tenant)
 

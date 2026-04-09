@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query
 from schemas import AnalyticsResponse, ChatLogEntry
 from services import firestore as firestore_service
 from services.dependencies import get_tenant_or_404
-from services.vectorstore import get_raw_index
+from services.vectorstore import get_raw_index, get_vectorstore
 
 router = APIRouter(prefix="/api/tenants/{tenant_id}", tags=["Analytics"])
 
@@ -30,15 +30,41 @@ async def get_chat_logs(
 
 @router.get("/documents")
 async def list_documents(tenant_id: str):
-    """Vector count in the tenant's Pinecone namespace."""
+    """Vector count + list of unique ingested documents in the tenant's namespace."""
     tenant = await get_tenant_or_404(tenant_id)
     namespace = tenant["pinecone_namespace"]
-    stats = get_raw_index().describe_index_stats()
+    index = get_raw_index()
+
+    stats = index.describe_index_stats()
     ns_stats = stats.get("namespaces", {}).get(namespace, {})
+    vector_count = ns_stats.get("vector_count", 0)
+
+    # Fetch a sample of vectors to extract unique source filenames
+    documents = []
+    if vector_count > 0:
+        from services.embedding import get_embedding_model
+        vectorstore = get_vectorstore(namespace)
+        # Dummy search to get vectors with metadata
+        results = vectorstore.similarity_search("document", k=min(vector_count, 100))
+        seen = set()
+        for doc in results:
+            filename = doc.metadata.get("source_filename", doc.metadata.get("source", ""))
+            category = doc.metadata.get("doc_category", "")
+            source_type = doc.metadata.get("source_type", "")
+            key = filename
+            if key and key not in seen:
+                seen.add(key)
+                documents.append({
+                    "filename": filename,
+                    "category": category,
+                    "source_type": source_type,
+                })
+
     return {
         "tenant_id": tenant_id,
         "namespace": namespace,
-        "vector_count": ns_stats.get("vector_count", 0),
+        "vector_count": vector_count,
+        "documents": sorted(documents, key=lambda d: d["filename"]),
     }
 
 
