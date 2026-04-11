@@ -120,6 +120,7 @@ async def ingest_legacy(
     filename: str,
     namespace: str,
     tenant_id: str,
+    skip_enrichment: bool = False,
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
@@ -132,6 +133,7 @@ async def ingest_legacy(
         filename=filename,
         namespace=namespace,
         tenant_id=tenant_id,
+        skip_enrichment=skip_enrichment,
         doc_category=doc_category,
         url=url,
         download_link=download_link,
@@ -169,6 +171,7 @@ async def ingest_pdf(
     filename: str,
     namespace: str,
     tenant_id: str,
+    skip_enrichment: bool = False,
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
@@ -228,6 +231,8 @@ async def ingest_pdf(
             filename, len(pages_data), len(vision_pages),
         )
         for batch_start in range(0, len(vision_pages), _PDF_BATCH_SIZE):
+            if batch_start > 0:
+                await asyncio.sleep(2)  # Rate limit: pause between batches
             batch = vision_pages[batch_start:batch_start + _PDF_BATCH_SIZE]
             tasks = [_process_pdf_page(p) for p in batch]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -259,7 +264,7 @@ async def ingest_pdf(
         metadata = _build_metadata(
             tenant_id, "pdf", filename, doc_category, url, download_link
         )
-        return await _upsert(chunks, namespace, metadata, full_text=full_text)
+        return await _upsert(chunks, namespace, metadata, full_text=full_text, skip_enrichment=skip_enrichment)
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -336,6 +341,7 @@ async def ingest_docx(
     filename: str,
     namespace: str,
     tenant_id: str,
+    skip_enrichment: bool = False,
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
@@ -380,14 +386,14 @@ async def ingest_docx(
                 if caption:
                     parts.append(f"[Image content: {caption}]")
             except Exception:
-                pass
+                logger.warning("Failed to extract image from DOCX '%s'", filename)
 
     full_text = "\n\n".join(parts)
     chunks = _smart_chunk(full_text, source=filename)
     metadata = _build_metadata(
         tenant_id, "docx", filename, doc_category, url, download_link
     )
-    return await _upsert(chunks, namespace, metadata, full_text=full_text)
+    return await _upsert(chunks, namespace, metadata, full_text=full_text, skip_enrichment=skip_enrichment)
 
 
 def _docx_table_to_markdown(table) -> str:
@@ -418,6 +424,7 @@ async def ingest_markdown(
     title: str,
     namespace: str,
     tenant_id: str,
+    skip_enrichment: bool = False,
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
@@ -430,7 +437,7 @@ async def ingest_markdown(
     metadata = _build_metadata(
         tenant_id, "web", source_name, doc_category, url, download_link
     )
-    return await _upsert(chunks, namespace, metadata, full_text=content)
+    return await _upsert(chunks, namespace, metadata, full_text=content, skip_enrichment=skip_enrichment)
 
 
 # ──────────────────────────────────────
@@ -445,6 +452,7 @@ async def ingest_spreadsheet(
     filename: str,
     namespace: str,
     tenant_id: str,
+    skip_enrichment: bool = False,
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
@@ -465,7 +473,7 @@ async def ingest_spreadsheet(
         metadata = _build_metadata(
             tenant_id, "spreadsheet", filename, doc_category, url, download_link
         )
-        total_chunks = await _upsert(chunks, namespace, metadata, full_text=structured)
+        total_chunks = await _upsert(chunks, namespace, metadata, full_text=structured, skip_enrichment=skip_enrichment)
         return 1, total_chunks
 
     xls = pd.ExcelFile(io.BytesIO(file_bytes))
@@ -479,7 +487,7 @@ async def ingest_spreadsheet(
         metadata = _build_metadata(
             tenant_id, "spreadsheet", filename, doc_category, url, download_link
         )
-        total_chunks += await _upsert(chunks, namespace, metadata, full_text=structured)
+        total_chunks += await _upsert(chunks, namespace, metadata, full_text=structured, skip_enrichment=skip_enrichment)
         sheets_processed += 1
 
     return sheets_processed, total_chunks
@@ -553,9 +561,12 @@ async def _enrich_with_context(
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
         temperature=0,
         max_tokens=150,
+        max_retries=3,
     )
 
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
+        if i > 0 and i % 5 == 0:
+            await asyncio.sleep(1)  # Rate limit: pause every 5 chunks
         try:
             context = await llm.ainvoke(
                 _CONTEXT_PROMPT.format(document=doc_summary, chunk=chunk.page_content)
@@ -579,9 +590,10 @@ async def _upsert(
     namespace: str,
     extra_metadata: dict[str, Any],
     full_text: str = "",
+    skip_enrichment: bool = False,
 ) -> int:
     """Contextual retrieval → URL extraction → metadata → upsert to Pinecone."""
-    if full_text:
+    if full_text and not skip_enrichment:
         chunks = await _enrich_with_context(chunks, full_text)
 
     for chunk in chunks:

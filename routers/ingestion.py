@@ -1,5 +1,6 @@
 """Document ingestion endpoints (PDF, DOCX, Markdown, XLSX/CSV, Google Drive)."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -212,6 +213,9 @@ async def _process_gdrive_folder(
                 doc_category=doc_category,
             )
 
+            # Skip contextual retrieval during batch to avoid rate limits
+            kwargs["skip_enrichment"] = True
+
             if file_type == "pdf":
                 chunks = await ingestion_service.ingest_pdf(**kwargs)
             elif file_type == "docx":
@@ -226,6 +230,9 @@ async def _process_gdrive_folder(
 
             ingested.append({"filename": filename, "chunks": chunks})
             logger.info("Ingested '%s' (%d chunks) for tenant %s", filename, chunks, tenant_id)
+
+            # Rate limit: pause between files to avoid 429
+            await asyncio.sleep(3)
 
         except Exception as e:
             logger.exception("Failed to ingest '%s'", filename)

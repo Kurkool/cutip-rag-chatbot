@@ -93,22 +93,22 @@ def _verify_request(body: bytes, signature: str, tenant: dict):
 
 async def _handle_message_event(event: dict, tenant: dict):
     token = tenant["line_channel_access_token"]
+    tenant_id = tenant["tenant_id"]
+    user_id = event["user_id"]
+    query = event["text"]
+
+    logger.info("[%s] user=%s query='%s'", tenant_id, user_id[:8], query[:50])
+
     try:
-        answer = await run_agent(
-            query=event["text"],
-            user_id=event["user_id"],
-            tenant=tenant,
-        )
+        answer = await run_agent(query=query, user_id=user_id, tenant=tenant)
 
-        # Log to Firestore
-        await firestore_service.log_chat(
-            tenant["tenant_id"], event["user_id"],
-            event["text"], answer, [],
-        )
-
+        await firestore_service.log_chat(tenant_id, user_id, query, answer, [])
         await reply_flex_message(event["reply_token"], answer, [], token)
+
+        logger.info("[%s] replied %d chars", tenant_id, len(answer))
+
     except Exception:
-        logger.exception("Error processing message for tenant %s", tenant["tenant_id"])
+        logger.exception("[%s] FAILED for user=%s query='%s'", tenant_id, user_id[:8], query[:50])
         await reply_message(
             event["reply_token"],
             "ขออภัยค่ะ เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง",

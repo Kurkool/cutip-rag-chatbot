@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # Ingestion
     LIBREOFFICE_TIMEOUT: int = 120  # seconds
     PDF_VISION_THRESHOLD: int = 100  # chars — pages below this use Vision
-    PDF_BATCH_SIZE: int = 5  # concurrent Vision calls per batch
+    PDF_BATCH_SIZE: int = 2  # concurrent Vision calls per batch (low to avoid rate limit)
     XLSX_BATCH_ROWS: int = 100  # rows per Claude interpretation batch
 
     model_config = {"env_file": ".env"}

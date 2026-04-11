@@ -1,6 +1,7 @@
 """Tenant-scoped tools for the agentic chatbot."""
 
 import ast
+import logging
 import operator
 
 from langchain_core.documents import Document
@@ -8,6 +9,8 @@ from langchain_core.tools import tool
 
 from services.reranker import rerank_documents
 from services.vectorstore import get_vectorstore
+
+logger = logging.getLogger(__name__)
 
 # Safe math operators (no eval!)
 _SAFE_OPS = {
@@ -34,13 +37,16 @@ def create_tools(namespace: str) -> list:
         forms, schedules, announcements, admission, and any faculty-related topics.
         You can call this multiple times with different keywords if the first
         search doesn't find what you need."""
-        vectorstore = get_vectorstore(namespace)
-        docs = vectorstore.similarity_search(query, k=10)
-        if not docs:
-            return "No relevant documents found for this query."
-
-        reranked = rerank_documents(query, docs, top_k=4)
-        return _format_results(reranked)
+        try:
+            vectorstore = get_vectorstore(namespace)
+            docs = vectorstore.similarity_search(query, k=10)
+            if not docs:
+                return "No relevant documents found for this query."
+            reranked = rerank_documents(query, docs, top_k=4)
+            return _format_results(reranked)
+        except Exception as e:
+            logger.exception("search_knowledge_base failed")
+            return f"Search error: {type(e).__name__} — {e}"
 
     @tool
     def search_by_category(query: str, category: str) -> str:
@@ -48,17 +54,18 @@ def create_tools(namespace: str) -> list:
         Use this when you know which type of document to look for.
         Categories: curriculum, form, announcement, schedule, general, spreadsheet.
         Example: search_by_category("ค่าเทอม", "curriculum")"""
-        vectorstore = get_vectorstore(namespace)
-        docs = vectorstore.similarity_search(
-            query,
-            k=10,
-            filter={"doc_category": category},
-        )
-        if not docs:
-            return f"No documents found in category '{category}' for this query."
-
-        reranked = rerank_documents(query, docs, top_k=4)
-        return _format_results(reranked)
+        try:
+            vectorstore = get_vectorstore(namespace)
+            docs = vectorstore.similarity_search(
+                query, k=10, filter={"doc_category": category},
+            )
+            if not docs:
+                return f"No documents found in category '{category}' for this query."
+            reranked = rerank_documents(query, docs, top_k=4)
+            return _format_results(reranked)
+        except Exception as e:
+            logger.exception("search_by_category failed")
+            return f"Search error: {type(e).__name__} — {e}"
 
     @tool
     def calculate(expression: str) -> str:

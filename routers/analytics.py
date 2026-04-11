@@ -42,7 +42,6 @@ async def list_documents(tenant_id: str):
     # Fetch a sample of vectors to extract unique source filenames
     documents = []
     if vector_count > 0:
-        from services.embedding import get_embedding_model
         vectorstore = get_vectorstore(namespace)
         # Dummy search to get vectors with metadata
         results = vectorstore.similarity_search("document", k=min(vector_count, 100))

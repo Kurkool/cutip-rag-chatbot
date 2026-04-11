@@ -44,6 +44,7 @@ def _get_vision_llm() -> ChatAnthropic:
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
         temperature=0,
         max_tokens=4096,
+        max_retries=3,
     )
 
 
@@ -65,8 +66,8 @@ async def parse_page_image(image_bytes: bytes) -> str:
             ])
         ])
         return response.content
-    except Exception:
-        logger.warning("Vision parse failed for a page, returning empty")
+    except Exception as e:
+        _log_api_error("Vision parse", e)
         return ""
 
 
@@ -76,6 +77,21 @@ async def interpret_spreadsheet(raw_text: str) -> str:
         prompt = _INTERPRET_SPREADSHEET_PROMPT.format(data=raw_text[:8000])
         response = await _get_vision_llm().ainvoke(prompt)
         return response.content
-    except Exception:
-        logger.warning("Spreadsheet interpretation failed, returning raw text")
+    except Exception as e:
+        _log_api_error("Spreadsheet interpretation", e)
         return raw_text
+
+
+def _log_api_error(context: str, error: Exception):
+    """Log API errors with specific messages for common failure modes."""
+    err_str = str(error).lower()
+    if "rate" in err_str and "limit" in err_str:
+        logger.error("%s: RATE LIMIT — too many requests, will retry later", context)
+    elif "credit" in err_str or "quota" in err_str or "billing" in err_str:
+        logger.error("%s: QUOTA/CREDIT EXHAUSTED — check billing", context)
+    elif "auth" in err_str or "key" in err_str or "401" in err_str:
+        logger.error("%s: AUTH FAILED — check API key", context)
+    elif "timeout" in err_str or "timed out" in err_str:
+        logger.error("%s: TIMEOUT — request took too long", context)
+    else:
+        logger.exception("%s failed: %s", context, error)
