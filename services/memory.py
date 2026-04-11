@@ -1,11 +1,14 @@
 """Firestore-backed conversation memory with TTL.
 
-Persists across Cloud Run instances. Each user's history is stored
-as a Firestore document with automatic expiry based on last activity.
+Persists across Cloud Run instances. Uses Firestore array operations
+to avoid race conditions on concurrent writes.
 """
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
+
+from google.cloud import firestore as fs
 
 from config import settings
 from services.firestore import _get_db
@@ -20,7 +23,6 @@ class ConversationMemory:
         if not doc:
             return []
 
-        # Check TTL
         last_active = doc.get("last_active")
         if last_active:
             elapsed = (datetime.now(timezone.utc) - last_active).total_seconds()
@@ -34,32 +36,33 @@ class ConversationMemory:
     def add_turn(self, user_id: str, query: str, answer: str):
         db = _get_db()
         doc_ref = db.collection(CONVERSATIONS_COLLECTION).document(user_id)
-        doc = doc_ref.get()
+        turn = {"query": query, "answer": answer}
 
-        turns = []
+        # Atomic operation: append to array + update timestamp
+        doc_ref.set(
+            {
+                "turns": fs.ArrayUnion([turn]),
+                "last_active": datetime.now(timezone.utc),
+            },
+            merge=True,
+        )
+
+        # Trim to max turns (separate operation, acceptable if slightly stale)
+        doc = doc_ref.get()
         if doc.exists:
             turns = doc.to_dict().get("turns", [])
-
-        turns.append({"query": query, "answer": answer})
-        # Keep only last N turns
-        turns = turns[-settings.MAX_HISTORY_TURNS:]
-
-        doc_ref.set({
-            "turns": turns,
-            "last_active": datetime.now(timezone.utc),
-        })
+            if len(turns) > settings.MAX_HISTORY_TURNS:
+                doc_ref.update({"turns": turns[-settings.MAX_HISTORY_TURNS:]})
 
     def clear(self, user_id: str):
         db = _get_db()
         db.collection(CONVERSATIONS_COLLECTION).document(user_id).delete()
 
     def _get_doc(self, user_id: str) -> dict[str, Any] | None:
-        db = _get_db()
-        doc = db.collection(CONVERSATIONS_COLLECTION).document(user_id).get()
+        doc = _get_db().collection(CONVERSATIONS_COLLECTION).document(user_id).get()
         if not doc.exists:
             return None
         return doc.to_dict()
 
 
-# Singleton
 conversation_memory = ConversationMemory()

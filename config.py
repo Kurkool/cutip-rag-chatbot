@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str
 
     # Cohere (embed-v4 + rerank-v3.5)
-    COHERE_API_KEY: str = ""
+    COHERE_API_KEY: str
 
     # GCP
     GOOGLE_CLOUD_PROJECT: str = "cutip-rag"
@@ -19,27 +19,37 @@ class Settings(BaseSettings):
     # Admin API Key
     ADMIN_API_KEY: str = ""
 
-    @field_validator("PINECONE_API_KEY", "ANTHROPIC_API_KEY")
+    @field_validator("PINECONE_API_KEY", "ANTHROPIC_API_KEY", "COHERE_API_KEY")
     @classmethod
-    def strip_whitespace(cls, v: str) -> str:
-        return v.strip()
+    def strip_and_validate(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("API key must not be empty")
+        return v
 
     # Models
+    LLM_MODEL: str = "claude-opus-4-6"
     EMBEDDING_MODEL: str = "embed-v4.0"
     RERANKER_MODEL: str = "rerank-v3.5"
-    LLM_MODEL: str = "claude-opus-4-6"
+    VISION_MODEL: str = "claude-haiku-4-5-20251001"
 
     # Chunking
     CHUNK_SIZE: int = 800
     CHUNK_OVERLAP: int = 150
 
     # Retrieval
-    RETRIEVAL_K: int = 10  # จำนวน chunks ที่ดึงมาก่อน rerank
-    TOP_K: int = 4  # จำนวน chunks สุดท้ายหลัง rerank
+    RETRIEVAL_K: int = 10
+    TOP_K: int = 4
 
     # Conversation Memory
-    MAX_HISTORY_TURNS: int = 5  # จำนวนรอบสนทนาที่เก็บไว้ต่อ user
-    MEMORY_TTL: int = 1800  # หมดอายุหลัง 30 นาทีไม่มีข้อความ
+    MAX_HISTORY_TURNS: int = 5
+    MEMORY_TTL: int = 1800  # seconds
+
+    # Ingestion
+    LIBREOFFICE_TIMEOUT: int = 120  # seconds
+    PDF_VISION_THRESHOLD: int = 100  # chars — pages below this use Vision
+    PDF_BATCH_SIZE: int = 5  # concurrent Vision calls per batch
+    XLSX_BATCH_ROWS: int = 100  # rows per Claude interpretation batch
 
     model_config = {"env_file": ".env"}
 

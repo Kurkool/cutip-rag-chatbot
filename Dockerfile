@@ -1,6 +1,11 @@
 # ใช้ Python 3.11 รุ่น slim เพื่อประสิทธิภาพที่รวดเร็วและ image ขนาดเล็ก
 FROM python:3.11-slim
 
+# ติดตั้ง LibreOffice สำหรับแปลง .doc/.xls/.ppt → PDF
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-core libreoffice-writer \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # ตั้งค่า Working Directory ใน Container
 WORKDIR /app
 

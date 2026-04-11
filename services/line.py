@@ -1,16 +1,20 @@
+"""LINE Messaging API — signature verification, reply messages."""
+
+import base64
 import hashlib
 import hmac
-import base64
-import json
+import logging
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 LINE_API_URL = "https://api.line.me/v2/bot/message/reply"
 
 
 def verify_signature(body: bytes, signature: str, channel_secret: str) -> bool:
-    """ตรวจสอบ X-Line-Signature ตาม LINE Messaging API spec"""
+    """Verify X-Line-Signature per LINE Messaging API spec."""
     hash_value = hmac.new(
         channel_secret.encode("utf-8"),
         body,
@@ -21,7 +25,7 @@ def verify_signature(body: bytes, signature: str, channel_secret: str) -> bool:
 
 
 def parse_text_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """ดึงเฉพาะ text message events จาก LINE webhook payload"""
+    """Extract text message events from LINE webhook payload."""
     events = []
     for event in payload.get("events", []):
         if (
@@ -37,19 +41,12 @@ def parse_text_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def reply_message(reply_token: str, text: str, channel_access_token: str):
-    """ส่งข้อความตอบกลับแบบ plain text"""
-    async with httpx.AsyncClient() as client:
-        await client.post(
-            LINE_API_URL,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {channel_access_token}",
-            },
-            json={
-                "replyToken": reply_token,
-                "messages": [{"type": "text", "text": text[:5000]}],
-            },
-        )
+    """Send a plain text reply via LINE."""
+    await _send_reply(
+        reply_token,
+        [{"type": "text", "text": text[:5000]}],
+        channel_access_token,
+    )
 
 
 async def reply_flex_message(
@@ -58,36 +55,39 @@ async def reply_flex_message(
     sources: list[dict[str, Any]],
     channel_access_token: str,
 ):
-    """
-    ส่ง Flex Message แบบ rich card พร้อมคำตอบและแหล่งอ้างอิง
-    ถ้าสร้าง Flex ไม่สำเร็จ จะ fallback เป็น plain text
-    """
+    """Send a rich Flex Message reply. Falls back to plain text on error."""
     try:
         messages = [_build_flex_message(answer, sources)]
     except Exception:
-        # Fallback to plain text
         messages = [{"type": "text", "text": answer[:5000]}]
 
+    await _send_reply(reply_token, messages, channel_access_token)
+
+
+async def _send_reply(
+    reply_token: str, messages: list[dict], channel_access_token: str,
+):
+    """Send messages via LINE Reply API with response validation."""
     async with httpx.AsyncClient() as client:
-        await client.post(
+        response = await client.post(
             LINE_API_URL,
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {channel_access_token}",
             },
-            json={
-                "replyToken": reply_token,
-                "messages": messages,
-            },
+            json={"replyToken": reply_token, "messages": messages},
         )
+        if response.status_code != 200:
+            logger.error(
+                "LINE reply failed: %d %s", response.status_code, response.text
+            )
 
 
 def _build_flex_message(answer: str, sources: list[dict[str, Any]]) -> dict:
-    """สร้าง LINE Flex Message bubble พร้อมคำตอบและอ้างอิง"""
-    # Truncate answer for Flex (LINE limit)
+    """Build a LINE Flex Message bubble with answer and source references."""
     display_answer = answer[:2000]
 
-    body_contents = [
+    body_contents: list[dict] = [
         {
             "type": "text",
             "text": display_answer,
@@ -97,7 +97,6 @@ def _build_flex_message(answer: str, sources: list[dict[str, Any]]) -> dict:
         }
     ]
 
-    # Add source references
     if sources:
         source_names = []
         for src in sources[:3]:

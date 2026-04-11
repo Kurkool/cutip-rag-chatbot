@@ -1,10 +1,27 @@
 """Tenant-scoped tools for the agentic chatbot."""
 
-import httpx
+import ast
+import operator
+
+from langchain_core.documents import Document
 from langchain_core.tools import tool
 
 from services.reranker import rerank_documents
 from services.vectorstore import get_vectorstore
+
+# Safe math operators (no eval!)
+_SAFE_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+}
+
+_MAX_RESULT_CHARS = 2000  # Truncate per document to fit LINE limits
 
 
 def create_tools(namespace: str) -> list:
@@ -45,12 +62,11 @@ def create_tools(namespace: str) -> list:
 
     @tool
     def calculate(expression: str) -> str:
-        """Evaluate a math expression. Use for tuition totals, GPA calculations,
+        """Evaluate a math expression safely. Use for tuition totals, GPA calculations,
         credit sums, or any numeric computation.
         Examples: '21000 * 8', '(3.5 + 4.0) / 2', '144 - 36'"""
-        allowed_names = {"abs": abs, "round": round, "min": min, "max": max}
         try:
-            result = eval(expression, {"__builtins__": {}}, allowed_names)
+            result = _safe_eval(ast.parse(expression, mode="eval").body)
             return str(result)
         except Exception as e:
             return f"Calculation error: {e}"
@@ -58,8 +74,8 @@ def create_tools(namespace: str) -> list:
     @tool
     def fetch_webpage(url: str) -> str:
         """Fetch and read a web page as text. Use when search results contain
-        a URL or link that might have additional relevant information.
-        Also useful for checking referenced documents, forms, or announcements."""
+        a URL or link that might have additional relevant information."""
+        import httpx
         try:
             response = httpx.get(
                 f"https://r.jina.ai/{url}",
@@ -74,7 +90,18 @@ def create_tools(namespace: str) -> list:
     return [search_knowledge_base, search_by_category, calculate, fetch_webpage]
 
 
-def _format_results(docs: list) -> str:
+def _safe_eval(node: ast.AST) -> float:
+    """Evaluate an AST math expression without using eval()."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_OPS:
+        return _SAFE_OPS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_OPS:
+        return _SAFE_OPS[type(node.op)](_safe_eval(node.operand))
+    raise ValueError(f"Unsupported expression: {ast.dump(node)}")
+
+
+def _format_results(docs: list[Document]) -> str:
     """Format reranked documents into a readable string for the agent."""
     results = []
     for i, doc in enumerate(docs, 1):
@@ -86,5 +113,6 @@ def _format_results(docs: list) -> str:
             header += f" (page {page})"
         if category:
             header += f" [{category}]"
-        results.append(f"{header}\n{doc.page_content}")
+        content = doc.page_content[:_MAX_RESULT_CHARS]
+        results.append(f"{header}\n{content}")
     return "\n\n---\n\n".join(results)

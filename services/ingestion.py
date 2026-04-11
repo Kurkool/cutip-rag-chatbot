@@ -5,6 +5,7 @@ import io
 import logging
 import os
 import re
+import subprocess
 import tempfile
 from typing import Any
 
@@ -88,6 +89,56 @@ def _build_metadata(
 
 
 # ──────────────────────────────────────
+# Legacy format conversion (.doc, .xls, .ppt → PDF)
+# ──────────────────────────────────────
+
+def _convert_to_pdf(file_bytes: bytes, src_ext: str) -> bytes:
+    """Convert legacy formats to PDF using LibreOffice headless."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src_path = os.path.join(tmpdir, f"input{src_ext}")
+        with open(src_path, "wb") as f:
+            f.write(file_bytes)
+
+        result = subprocess.run(
+            ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", tmpdir, src_path],
+            capture_output=True,
+            timeout=settings.LIBREOFFICE_TIMEOUT,
+        )
+        if result.returncode != 0:
+            logger.error("LibreOffice failed: %s", result.stderr.decode(errors="replace"))
+
+        pdf_path = os.path.join(tmpdir, "input.pdf")
+        if not os.path.exists(pdf_path):
+            raise RuntimeError(f"LibreOffice conversion failed for {src_ext}")
+
+        with open(pdf_path, "rb") as f:
+            return f.read()
+
+
+async def ingest_legacy(
+    file_bytes: bytes,
+    filename: str,
+    namespace: str,
+    tenant_id: str,
+    doc_category: str = "general",
+    url: str = "",
+    download_link: str = "",
+) -> int:
+    """Convert .doc/.xls/.ppt → PDF → Vision pipeline."""
+    ext = os.path.splitext(filename)[1].lower()
+    pdf_bytes = _convert_to_pdf(file_bytes, ext)
+    return await ingest_pdf(
+        file_bytes=pdf_bytes,
+        filename=filename,
+        namespace=namespace,
+        tenant_id=tenant_id,
+        doc_category=doc_category,
+        url=url,
+        download_link=download_link,
+    )
+
+
+# ──────────────────────────────────────
 # Duplicate Detection: delete old vectors before re-ingest
 # ──────────────────────────────────────
 
@@ -109,8 +160,8 @@ def _delete_existing_vectors(namespace: str, source_filename: str):
 # PDF Ingestion (Hybrid: text extraction + Vision fallback)
 # ──────────────────────────────────────
 
-_VISION_THRESHOLD = 100  # Pages with < 100 chars text → use Vision
-_PDF_BATCH_SIZE = 5
+_VISION_THRESHOLD = settings.PDF_VISION_THRESHOLD
+_PDF_BATCH_SIZE = settings.PDF_BATCH_SIZE
 
 
 async def ingest_pdf(
@@ -386,7 +437,7 @@ async def ingest_markdown(
 # Spreadsheet Ingestion (Claude interprets, batched for large sheets)
 # ──────────────────────────────────────
 
-_XLSX_BATCH_ROWS = 100  # Send 100 rows at a time to Claude
+_XLSX_BATCH_ROWS = settings.XLSX_BATCH_ROWS
 
 
 async def ingest_spreadsheet(
@@ -498,7 +549,7 @@ async def _enrich_with_context(
         doc_summary = full_text
 
     llm = ChatAnthropic(
-        model="claude-haiku-4-5-20251001",
+        model=settings.VISION_MODEL,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
         temperature=0,
         max_tokens=150,

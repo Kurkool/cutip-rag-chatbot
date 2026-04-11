@@ -1,14 +1,20 @@
-"""Document ingestion endpoints (PDF, DOCX, Markdown, XLSX/CSV)."""
+"""Document ingestion endpoints (PDF, DOCX, Markdown, XLSX/CSV, Google Drive)."""
+
+import logging
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 
 from schemas import IngestMarkdownRequest, IngestResponse, IngestSpreadsheetResponse
 from services import ingestion as ingestion_service
 from services.dependencies import fix_filename, get_tenant_or_404, parse_file_extension
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/tenants/{tenant_id}/ingest", tags=["Ingestion"])
 
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".doc", ".docx"}
+LEGACY_EXTENSIONS = {".doc", ".xls", ".ppt"}
 ALLOWED_SHEET_EXTENSIONS = {".xlsx", ".csv"}
 
 
@@ -45,6 +51,8 @@ async def ingest_document(
 
     if ext == ".pdf":
         chunks = await ingestion_service.ingest_pdf(**kwargs)
+    elif ext in LEGACY_EXTENSIONS:
+        chunks = await ingestion_service.ingest_legacy(**kwargs)
     else:
         chunks = await ingestion_service.ingest_docx(**kwargs)
 
@@ -113,4 +121,119 @@ async def ingest_spreadsheet(
         message=f"Ingested '{filename}' into namespace '{namespace}'",
         sheets_processed=sheets,
         chunks_processed=chunks,
+    )
+
+
+# ──────────────────────────────────────
+# Google Drive Ingestion
+# ──────────────────────────────────────
+
+class GDriveIngestRequest(BaseModel):
+    folder_id: str
+    doc_category: str = "general"
+
+
+class GDriveIngestResult(BaseModel):
+    total_files: int
+    ingested: list[dict]
+    skipped: list[dict]
+    errors: list[dict]
+
+
+@router.post("/gdrive", response_model=GDriveIngestResult)
+async def ingest_gdrive_folder(tenant_id: str, body: GDriveIngestRequest):
+    """
+    Batch: ingest ALL supported files from a Google Drive folder.
+    Supported: PDF, DOCX, XLSX, CSV.
+    """
+    tenant = await get_tenant_or_404(tenant_id)
+    return await _process_gdrive_folder(
+        tenant, body.folder_id, body.doc_category, skip_existing=False,
+    )
+
+
+@router.post("/gdrive/scan", response_model=GDriveIngestResult)
+async def scan_gdrive_folder(tenant_id: str, body: GDriveIngestRequest):
+    """
+    Smart: ingest only NEW files from a Google Drive folder.
+    Skips files already ingested (by filename match).
+    Use this for scheduled auto-ingest (Cloud Scheduler).
+    """
+    tenant = await get_tenant_or_404(tenant_id)
+    return await _process_gdrive_folder(
+        tenant, body.folder_id, body.doc_category, skip_existing=True,
+    )
+
+
+async def _process_gdrive_folder(
+    tenant: dict, folder_id: str, doc_category: str, skip_existing: bool,
+) -> GDriveIngestResult:
+    from services.gdrive import download_file, get_file_type, list_files
+    from services.vectorstore import get_vectorstore
+
+    namespace = tenant["pinecone_namespace"]
+    tenant_id = tenant["tenant_id"]
+
+    # List files in Drive folder
+    files = list_files(folder_id)
+    if not files:
+        return GDriveIngestResult(total_files=0, ingested=[], skipped=[], errors=[])
+
+    # Get existing filenames to skip duplicates
+    existing_filenames: set[str] = set()
+    if skip_existing:
+        vs = get_vectorstore(namespace)
+        existing_docs = vs.similarity_search("document", k=100)
+        for doc in existing_docs:
+            fn = doc.metadata.get("source_filename", "")
+            if fn:
+                existing_filenames.add(fn)
+
+    ingested = []
+    skipped = []
+    errors = []
+
+    for f in files:
+        filename = f["name"]
+        file_type = get_file_type(f["mimeType"])
+
+        # Skip existing?
+        if skip_existing and filename in existing_filenames:
+            skipped.append({"filename": filename, "reason": "already ingested"})
+            continue
+
+        try:
+            file_bytes = download_file(f["id"])
+            kwargs = dict(
+                file_bytes=file_bytes,
+                filename=filename,
+                namespace=namespace,
+                tenant_id=tenant_id,
+                doc_category=doc_category,
+            )
+
+            if file_type == "pdf":
+                chunks = await ingestion_service.ingest_pdf(**kwargs)
+            elif file_type == "docx":
+                chunks = await ingestion_service.ingest_docx(**kwargs)
+            elif file_type in ("doc", "xls"):
+                chunks = await ingestion_service.ingest_legacy(**kwargs)
+            elif file_type in ("xlsx", "csv"):
+                _, chunks = await ingestion_service.ingest_spreadsheet(**kwargs)
+            else:
+                skipped.append({"filename": filename, "reason": f"unsupported type: {file_type}"})
+                continue
+
+            ingested.append({"filename": filename, "chunks": chunks})
+            logger.info("Ingested '%s' (%d chunks) for tenant %s", filename, chunks, tenant_id)
+
+        except Exception as e:
+            logger.exception("Failed to ingest '%s'", filename)
+            errors.append({"filename": filename, "error": str(e)})
+
+    return GDriveIngestResult(
+        total_files=len(files),
+        ingested=ingested,
+        skipped=skipped,
+        errors=errors,
     )

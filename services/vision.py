@@ -10,8 +10,6 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-_VISION_MODEL = "claude-haiku-4-5-20251001"
-
 _PARSE_PAGE_PROMPT = (
     "Read this document page and convert to well-structured Markdown.\n\n"
     "Rules:\n"
@@ -42,7 +40,7 @@ _INTERPRET_SPREADSHEET_PROMPT = (
 
 def _get_vision_llm() -> ChatAnthropic:
     return ChatAnthropic(
-        model=_VISION_MODEL,
+        model=settings.VISION_MODEL,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
         temperature=0,
         max_tokens=4096,
@@ -52,9 +50,8 @@ def _get_vision_llm() -> ChatAnthropic:
 async def parse_page_image(image_bytes: bytes) -> str:
     """Send a page image to Claude Vision, get back structured markdown."""
     b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    llm = _get_vision_llm()
     try:
-        response = await llm.ainvoke([
+        response = await _get_vision_llm().ainvoke([
             HumanMessage(content=[
                 {
                     "type": "image",
@@ -75,10 +72,9 @@ async def parse_page_image(image_bytes: bytes) -> str:
 
 async def interpret_spreadsheet(raw_text: str) -> str:
     """Send raw spreadsheet data to Claude, get back structured markdown."""
-    llm = _get_vision_llm()
     try:
         prompt = _INTERPRET_SPREADSHEET_PROMPT.format(data=raw_text[:8000])
-        response = await llm.ainvoke(prompt)
+        response = await _get_vision_llm().ainvoke(prompt)
         return response.content
     except Exception:
         logger.warning("Spreadsheet interpretation failed, returning raw text")

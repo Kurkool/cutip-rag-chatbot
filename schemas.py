@@ -15,7 +15,7 @@ class TenantCreate(BaseModel):
     line_channel_access_token: str
     line_channel_secret: str
     pinecone_namespace: str
-    persona: str = ""  # Empty = use DEFAULT_PERSONA from rag_chain.py
+    persona: str = ""  # Empty = use DEFAULT_PERSONA from agent.py
     is_active: bool = True
 
 

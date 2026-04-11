@@ -1,5 +1,10 @@
-"""Firestore client for tenant config and chat log persistence."""
+"""Firestore client for tenant config and chat log persistence.
 
+All Firestore SDK calls are synchronous — we wrap them with
+asyncio.to_thread() to avoid blocking the async event loop.
+"""
+
+import asyncio
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
@@ -19,10 +24,10 @@ def _get_db() -> firestore.Client:
 
 
 # ──────────────────────────────────────
-# Tenants
+# Sync helpers (run in thread pool)
 # ──────────────────────────────────────
 
-async def create_tenant(data: dict[str, Any]) -> dict[str, Any]:
+def _create_tenant_sync(data: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
     tenant_id = data.pop("tenant_id")
     now = datetime.now(timezone.utc)
@@ -31,14 +36,14 @@ async def create_tenant(data: dict[str, Any]) -> dict[str, Any]:
     return {"tenant_id": tenant_id, **doc_data}
 
 
-async def get_tenant(tenant_id: str) -> dict[str, Any] | None:
+def _get_tenant_sync(tenant_id: str) -> dict[str, Any] | None:
     doc = _get_db().collection(TENANTS_COLLECTION).document(tenant_id).get()
     if not doc.exists:
         return None
     return {"tenant_id": doc.id, **doc.to_dict()}
 
 
-async def get_tenant_by_destination(line_destination: str) -> dict[str, Any] | None:
+def _get_tenant_by_destination_sync(line_destination: str) -> dict[str, Any] | None:
     docs = (
         _get_db()
         .collection(TENANTS_COLLECTION)
@@ -52,22 +57,22 @@ async def get_tenant_by_destination(line_destination: str) -> dict[str, Any] | N
     return None
 
 
-async def list_tenants() -> list[dict[str, Any]]:
+def _list_tenants_sync() -> list[dict[str, Any]]:
     docs = _get_db().collection(TENANTS_COLLECTION).get()
     return [{"tenant_id": doc.id, **doc.to_dict()} for doc in docs]
 
 
-async def update_tenant(tenant_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+def _update_tenant_sync(tenant_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
     db = _get_db()
     doc_ref = db.collection(TENANTS_COLLECTION).document(tenant_id)
     if not doc_ref.get().exists:
         return None
     data["updated_at"] = datetime.now(timezone.utc)
     doc_ref.update(data)
-    return await get_tenant(tenant_id)
+    return _get_tenant_sync(tenant_id)
 
 
-async def delete_tenant(tenant_id: str) -> bool:
+def _delete_tenant_sync(tenant_id: str) -> bool:
     db = _get_db()
     doc_ref = db.collection(TENANTS_COLLECTION).document(tenant_id)
     if not doc_ref.get().exists:
@@ -76,15 +81,8 @@ async def delete_tenant(tenant_id: str) -> bool:
     return True
 
 
-# ──────────────────────────────────────
-# Chat Logs
-# ──────────────────────────────────────
-
-async def log_chat(
-    tenant_id: str,
-    user_id: str,
-    query: str,
-    answer: str,
+def _log_chat_sync(
+    tenant_id: str, user_id: str, query: str, answer: str,
     sources: list[dict[str, Any]],
 ) -> str:
     doc_ref = _get_db().collection(CHAT_LOGS_COLLECTION).document()
@@ -99,8 +97,8 @@ async def log_chat(
     return doc_ref.id
 
 
-async def get_chat_logs(
-    tenant_id: str, limit: int = 50, offset: int = 0
+def _get_chat_logs_sync(
+    tenant_id: str, limit: int = 50, offset: int = 0,
 ) -> list[dict[str, Any]]:
     query = (
         _get_db()
@@ -113,7 +111,7 @@ async def get_chat_logs(
     return [{"id": doc.id, **doc.to_dict()} for doc in query.get()]
 
 
-async def get_analytics(tenant_id: str) -> dict[str, Any]:
+def _get_analytics_sync(tenant_id: str) -> dict[str, Any]:
     docs = (
         _get_db()
         .collection(CHAT_LOGS_COLLECTION)
@@ -130,3 +128,40 @@ async def get_analytics(tenant_id: str) -> dict[str, Any]:
         "total_chats": total,
         "unique_users": len(user_ids),
     }
+
+
+# ──────────────────────────────────────
+# Async wrappers (non-blocking)
+# ──────────────────────────────────────
+
+async def create_tenant(data: dict[str, Any]) -> dict[str, Any]:
+    return await asyncio.to_thread(_create_tenant_sync, data)
+
+async def get_tenant(tenant_id: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_get_tenant_sync, tenant_id)
+
+async def get_tenant_by_destination(line_destination: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_get_tenant_by_destination_sync, line_destination)
+
+async def list_tenants() -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_list_tenants_sync)
+
+async def update_tenant(tenant_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_update_tenant_sync, tenant_id, data)
+
+async def delete_tenant(tenant_id: str) -> bool:
+    return await asyncio.to_thread(_delete_tenant_sync, tenant_id)
+
+async def log_chat(
+    tenant_id: str, user_id: str, query: str, answer: str,
+    sources: list[dict[str, Any]],
+) -> str:
+    return await asyncio.to_thread(_log_chat_sync, tenant_id, user_id, query, answer, sources)
+
+async def get_chat_logs(
+    tenant_id: str, limit: int = 50, offset: int = 0,
+) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_get_chat_logs_sync, tenant_id, limit, offset)
+
+async def get_analytics(tenant_id: str) -> dict[str, Any]:
+    return await asyncio.to_thread(_get_analytics_sync, tenant_id)
