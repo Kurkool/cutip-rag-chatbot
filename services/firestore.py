@@ -16,6 +16,7 @@ from config import settings
 
 TENANTS_COLLECTION = "tenants"
 CHAT_LOGS_COLLECTION = "chat_logs"
+ADMIN_USERS_COLLECTION = "admin_users"
 
 
 @lru_cache()
@@ -131,6 +132,53 @@ def _get_analytics_sync(tenant_id: str) -> dict[str, Any]:
 
 
 # ──────────────────────────────────────
+# Admin Users (sync)
+# ──────────────────────────────────────
+
+def _create_admin_user_sync(uid: str, data: dict[str, Any]) -> dict[str, Any]:
+    db = _get_db()
+    now = datetime.now(timezone.utc)
+    doc_data = {**data, "created_at": now, "updated_at": now}
+    db.collection(ADMIN_USERS_COLLECTION).document(uid).set(doc_data)
+    return {"uid": uid, **doc_data}
+
+
+def _get_admin_user_sync(uid: str) -> dict[str, Any] | None:
+    doc = _get_db().collection(ADMIN_USERS_COLLECTION).document(uid).get()
+    if not doc.exists:
+        return None
+    return {"uid": doc.id, **doc.to_dict()}
+
+
+def _list_admin_users_sync() -> list[dict[str, Any]]:
+    docs = _get_db().collection(ADMIN_USERS_COLLECTION).get()
+    return [{"uid": doc.id, **doc.to_dict()} for doc in docs]
+
+
+def _update_admin_user_sync(uid: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    db = _get_db()
+    doc_ref = db.collection(ADMIN_USERS_COLLECTION).document(uid)
+    if not doc_ref.get().exists:
+        return None
+    data["updated_at"] = datetime.now(timezone.utc)
+    doc_ref.update(data)
+    return _get_admin_user_sync(uid)
+
+
+def _delete_admin_user_sync(uid: str) -> bool:
+    db = _get_db()
+    doc_ref = db.collection(ADMIN_USERS_COLLECTION).document(uid)
+    if not doc_ref.get().exists:
+        return False
+    doc_ref.delete()
+    return True
+
+
+def _count_admin_users_sync() -> int:
+    return len(_get_db().collection(ADMIN_USERS_COLLECTION).get())
+
+
+# ──────────────────────────────────────
 # Async wrappers (non-blocking)
 # ──────────────────────────────────────
 
@@ -165,3 +213,24 @@ async def get_chat_logs(
 
 async def get_analytics(tenant_id: str) -> dict[str, Any]:
     return await asyncio.to_thread(_get_analytics_sync, tenant_id)
+
+
+# Admin Users
+
+async def create_admin_user(uid: str, data: dict[str, Any]) -> dict[str, Any]:
+    return await asyncio.to_thread(_create_admin_user_sync, uid, data)
+
+async def get_admin_user(uid: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_get_admin_user_sync, uid)
+
+async def list_admin_users() -> list[dict[str, Any]]:
+    return await asyncio.to_thread(_list_admin_users_sync)
+
+async def update_admin_user(uid: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    return await asyncio.to_thread(_update_admin_user_sync, uid, data)
+
+async def delete_admin_user(uid: str) -> bool:
+    return await asyncio.to_thread(_delete_admin_user_sync, uid)
+
+async def count_admin_users() -> int:
+    return await asyncio.to_thread(_count_admin_users_sync)

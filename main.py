@@ -4,12 +4,21 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.security import APIKeyHeader
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
-from config import settings
-from routers import analytics_router, ingestion_router, tenants_router, webhook_router
+from config import APP_VERSION, settings
+from services.rate_limit import limiter
+from routers import (
+    analytics_router,
+    ingestion_router,
+    tenants_router,
+    users_router,
+    webhook_router,
+)
 from services.embedding import get_embedding_model
 from services.reranker import get_reranker
 from services.vectorstore import get_vectorstore
@@ -23,19 +32,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-# ──────────────────────────────────────
-# API Key Authentication
-# ──────────────────────────────────────
-
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def verify_api_key(api_key: str = Security(_api_key_header)):
-    if not settings.ADMIN_API_KEY:
-        return
-    if api_key != settings.ADMIN_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
 
 
 # ──────────────────────────────────────
@@ -60,8 +56,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Multi-Tenant University RAG SaaS",
     description="RAG Chatbot platform: LINE OA, multi-format ingestion, per-tenant isolation",
-    version="3.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
+)
+
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — explicit origins only (no wildcard with credentials)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 
@@ -97,12 +106,13 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Public
 app.include_router(webhook_router)
 
-# Protected (requires X-API-Key)
-app.include_router(tenants_router, dependencies=[Depends(verify_api_key)])
-app.include_router(ingestion_router, dependencies=[Depends(verify_api_key)])
-app.include_router(analytics_router, dependencies=[Depends(verify_api_key)])
+# Auth is handled per-endpoint inside each router via Depends(get_current_user)
+app.include_router(users_router)
+app.include_router(tenants_router)
+app.include_router(ingestion_router)
+app.include_router(analytics_router)
 
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    return {"status": "ok", "version": "3.0.0"}
+    return {"status": "ok", "version": APP_VERSION}

@@ -115,11 +115,14 @@ def _format_results(docs: list[Document]) -> str:
         source = doc.metadata.get("source_filename", doc.metadata.get("source", "unknown"))
         page = doc.metadata.get("page", "")
         category = doc.metadata.get("doc_category", "")
+        download_link = doc.metadata.get("download_link", "")
         header = f"[{i}] Source: {source}"
         if page and page != "N/A":
             header += f" (page {page})"
         if category:
             header += f" [{category}]"
+        if download_link:
+            header += f"\n    Download: {download_link}"
         content = doc.page_content[:_MAX_RESULT_CHARS]
         results.append(f"{header}\n{content}")
     return "\n\n---\n\n".join(results)

@@ -3,8 +3,9 @@
 import os
 from typing import Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
+from config import settings
 from services import firestore as firestore_service
 
 
@@ -47,6 +48,35 @@ def fix_filename(filename: str) -> str:
     except (UnicodeDecodeError, UnicodeEncodeError):
         pass
     return filename
+
+
+# ──────────────────────────────────────
+# File upload validation
+# ──────────────────────────────────────
+
+async def validate_upload(file: UploadFile, allowed_extensions: set[str]) -> bytes:
+    """Validate file size and extension, return file bytes."""
+    max_bytes = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    file_bytes = await file.read()
+
+    if len(file_bytes) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum size: {settings.MAX_UPLOAD_SIZE_MB}MB",
+        )
+
+    if len(file_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    filename = fix_filename(file.filename or "unknown")
+    ext = parse_file_extension(filename)
+    if ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported format. Allowed: {', '.join(sorted(allowed_extensions))}",
+        )
+
+    return file_bytes
 
 
 # ──────────────────────────────────────

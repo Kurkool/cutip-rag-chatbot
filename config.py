@@ -1,6 +1,8 @@
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
+APP_VERSION = "4.1.0"
+
 
 class Settings(BaseSettings):
     # Pinecone
@@ -15,6 +17,13 @@ class Settings(BaseSettings):
 
     # GCP
     GOOGLE_CLOUD_PROJECT: str = "cutip-rag"
+    FIREBASE_PROJECT_ID: str = "cutip-rag"
+
+    # CORS
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ]
 
     # Admin API Key
     ADMIN_API_KEY: str = ""
@@ -44,6 +53,23 @@ class Settings(BaseSettings):
     # Conversation Memory
     MAX_HISTORY_TURNS: int = 5
     MEMORY_TTL: int = 1800  # seconds
+
+    # Rate Limiting (requests per window)
+    RATE_LIMIT_CHAT: str = "20/minute"        # per user — LINE + /api/chat
+    RATE_LIMIT_ADMIN: str = "60/minute"        # per user — admin CRUD
+    RATE_LIMIT_INGESTION: str = "10/minute"    # per tenant — heavy operations
+    RATE_LIMIT_AUTH: str = "3/minute"          # per IP — login brute-force protection
+
+    # File upload limits
+    MAX_UPLOAD_SIZE_MB: int = 50  # max file size in MB
+    ALLOWED_CONTENT_TYPES: list[str] = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/csv",
+        "application/vnd.ms-excel",
+    ]
 
     # Ingestion
     LIBREOFFICE_TIMEOUT: int = 120  # seconds
