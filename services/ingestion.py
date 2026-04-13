@@ -50,7 +50,7 @@ def _smart_chunk(text: str, source: str = "") -> list[Document]:
     header_chunks = md_header_splitter.split_text(text)
     if not header_chunks:
         return text_splitter.create_documents(
-            [text], metadatas=[{"source": source}]
+            [text], metadatas=[{"source_filename": source}]
         )
 
     final_chunks = text_splitter.split_documents(header_chunks)
@@ -62,7 +62,7 @@ def _smart_chunk(text: str, source: str = "") -> list[Document]:
         )
         if header_path and not chunk.page_content.startswith(header_path):
             chunk.page_content = f"[{header_path}]\n{chunk.page_content}"
-        chunk.metadata["source"] = source
+        chunk.metadata["source_filename"] = source
     return final_chunks
 
 
@@ -315,7 +315,7 @@ def _chunk_pages(pages: list[dict], source: str = "") -> list[Document]:
             if buffer:
                 chunks.append(Document(
                     page_content=buffer,
-                    metadata={"source": source, "pages": buffer_pages},
+                    metadata={"source_filename": source, "pages": buffer_pages},
                 ))
                 buffer = ""
                 buffer_pages = []
@@ -327,7 +327,7 @@ def _chunk_pages(pages: list[dict], source: str = "") -> list[Document]:
     if buffer:
         chunks.append(Document(
             page_content=buffer,
-            metadata={"source": source, "pages": buffer_pages},
+            metadata={"source_filename": source, "pages": buffer_pages},
         ))
     return chunks
 

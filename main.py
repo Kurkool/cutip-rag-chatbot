@@ -14,8 +14,10 @@ from config import APP_VERSION, settings
 from services.rate_limit import limiter
 from routers import (
     analytics_router,
+    backup_router,
     ingestion_router,
     tenants_router,
+    usage_router,
     users_router,
     webhook_router,
 )
@@ -93,6 +95,18 @@ async def log_requests(request: Request, call_next):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+
+    # Fire-and-forget Slack alert
+    try:
+        from services.notifications import alert_error
+        await alert_error(
+            "Unhandled Server Error",
+            f"`{type(exc).__name__}`: {str(exc)[:200]}",
+            Endpoint=f"{request.method} {request.url.path}",
+        )
+    except Exception:
+        logger.warning("Failed to send Slack alert", exc_info=True)
+
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error. Check logs for details."},
@@ -111,6 +125,8 @@ app.include_router(users_router)
 app.include_router(tenants_router)
 app.include_router(ingestion_router)
 app.include_router(analytics_router)
+app.include_router(usage_router)
+app.include_router(backup_router)
 
 
 @app.get("/health", tags=["Health"])

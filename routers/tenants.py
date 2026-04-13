@@ -6,12 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from schemas import TenantCreate, TenantResponse, TenantUpdate
 from services import firestore as firestore_service
-from services.auth import (
-    check_tenant_access,
-    get_accessible_tenant,
-    get_current_user,
-    require_super_admin,
-)
+from services.auth import get_accessible_tenant, get_current_user, require_super_admin
 from services.vectorstore import get_raw_index
 
 logger = logging.getLogger(__name__)
@@ -49,19 +44,17 @@ async def get_tenant(tenant: dict = Depends(get_accessible_tenant)):
 
 @router.put("/{tenant_id}", response_model=TenantResponse)
 async def update_tenant(
-    tenant_id: str,
     body: TenantUpdate,
-    current_user: dict = Depends(get_current_user),
+    tenant: dict = Depends(get_accessible_tenant),
 ):
     """Update tenant config. Faculty admin can update assigned tenants."""
-    check_tenant_access(current_user, tenant_id)
     update_data = body.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
-    tenant = await firestore_service.update_tenant(tenant_id, update_data)
-    if not tenant:
+    updated = await firestore_service.update_tenant(tenant["tenant_id"], update_data)
+    if not updated:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    return tenant
+    return updated
 
 
 @router.delete("/{tenant_id}", status_code=204)

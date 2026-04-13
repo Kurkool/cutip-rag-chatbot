@@ -25,6 +25,13 @@ class Settings(BaseSettings):
         "http://localhost:3001",
     ]
 
+    # Slack alerting (optional — leave empty to disable)
+    SLACK_WEBHOOK_URL: str = ""
+    SLACK_ALERT_CHANNEL: str = "#rag-alerts"
+
+    # Backup
+    BACKUP_GCS_BUCKET: str = "cutip-rag-backups"
+
     # Admin API Key
     ADMIN_API_KEY: str = ""
 

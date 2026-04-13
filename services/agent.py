@@ -87,6 +87,19 @@ async def run_agent(
         })
         answer = result["messages"][-1].content
 
+        # Track usage (fire-and-forget)
+        from services.usage import track
+        tid = tenant["tenant_id"]
+        await track(tid, "llm_call")
+        # Count tool invocations (each has tool_calls list), not tool results
+        search_count = sum(
+            len(m.tool_calls) for m in result["messages"]
+            if hasattr(m, "tool_calls") and m.tool_calls
+        )
+        if search_count:
+            await track(tid, "embedding_call", search_count)
+            await track(tid, "reranker_call", search_count)
+
     except AuthenticationError:
         logger.error("Anthropic API key invalid or expired")
         answer = "ขออภัยค่ะ ระบบมีปัญหาด้านการยืนยันตัวตน กรุณาแจ้ง admin"

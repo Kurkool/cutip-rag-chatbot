@@ -105,6 +105,17 @@ async def _handle_message_event(event: dict[str, Any], tenant: dict[str, Any]) -
         await reply_flex_message(event["reply_token"], answer, [], token)
         logger.info("[%s] replied %d chars", tenant_id, len(answer))
 
-    except Exception:
+    except Exception as exc:
         logger.exception("[%s] FAILED for user=%s query='%s'", tenant_id, user_id[:8], query[:50])
         await reply_message(event["reply_token"], ERROR_REPLY_THAI, token)
+
+        try:
+            from services.notifications import alert_error
+            await alert_error(
+                "Chat Error",
+                f"`{type(exc).__name__}`: {str(exc)[:200]}",
+                Tenant=tenant_id,
+                Query=query[:100],
+            )
+        except Exception:
+            logger.warning("Failed to send Slack alert", exc_info=True)

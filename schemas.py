@@ -193,6 +193,15 @@ class GDriveIngestResult(BaseModel):
 
 
 # ──────────────────────────────────────
+# Backup / Restore
+# ──────────────────────────────────────
+
+class PineconeRestoreRequest(BaseModel):
+    gcs_uri: str = Field(..., max_length=2000)
+    namespace: str = Field(..., pattern=r"^[a-z0-9_-]+$", max_length=64)
+
+
+# ──────────────────────────────────────
 # Chat
 # ──────────────────────────────────────
 

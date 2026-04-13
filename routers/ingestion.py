@@ -205,13 +205,10 @@ async def _ingest_by_type(file_type: str, kwargs: dict) -> int | None:
     return None
 
 
-async def _get_existing_filenames(namespace: str) -> set[str]:
-    """Fetch filenames already ingested in a namespace."""
-    from services.vectorstore import get_vectorstore
-
-    vs = get_vectorstore(namespace)
-    docs = vs.similarity_search("document", k=100)
-    return {doc.metadata.get("source_filename", "") for doc in docs} - {""}
+def _get_existing_filenames(namespace: str) -> set[str]:
+    """Fetch all unique source_filenames in a namespace via Pinecone metadata."""
+    from services.vectorstore import get_unique_filenames
+    return get_unique_filenames(namespace)
 
 
 async def _process_gdrive_folder(
@@ -227,7 +224,7 @@ async def _process_gdrive_folder(
     if not files:
         return GDriveIngestResult(total_files=0, ingested=[], skipped=[], errors=[])
 
-    existing = await _get_existing_filenames(namespace) if skip_existing else set()
+    existing = await asyncio.to_thread(_get_existing_filenames, namespace) if skip_existing else set()
 
     ingested, skipped, errors = [], [], []
 
