@@ -8,10 +8,10 @@ from unittest.mock import patch, AsyncMock, MagicMock
 async def test_ingest_pdf_tracks_vision_calls():
     """When PDF pages use vision (low text), usage.track is called."""
     with (
-        patch("services.ingestion.get_vectorstore") as mock_vs,
-        patch("services.ingestion.get_raw_index") as mock_idx,
-        patch("services.ingestion.parse_page_image", new_callable=AsyncMock) as mock_vision,
-        patch("services.ingestion.usage") as mock_usage,
+        patch("ingest.services.ingestion.get_vectorstore") as mock_vs,
+        patch("ingest.services.ingestion.get_raw_index") as mock_idx,
+        patch("ingest.services.ingestion.parse_page_image", new_callable=AsyncMock) as mock_vision,
+        patch("ingest.services.ingestion.usage") as mock_usage,
     ):
         mock_vs.return_value = MagicMock(
             aadd_documents=AsyncMock(return_value=None)
@@ -22,7 +22,7 @@ async def test_ingest_pdf_tracks_vision_calls():
         mock_vision.return_value = "# Parsed content from vision"
         mock_usage.track = AsyncMock()
 
-        from services.ingestion import ingest_pdf
+        from ingest.services.ingestion import ingest_pdf
 
         # Minimal 1-page blank PDF → triggers vision (no text)
         import pymupdf
@@ -48,10 +48,10 @@ async def test_ingest_pdf_tracks_vision_calls():
 async def test_ingest_csv_tracks_vision_calls():
     """CSV ingestion uses interpret_spreadsheet which is a vision call."""
     with (
-        patch("services.ingestion.get_vectorstore") as mock_vs,
-        patch("services.ingestion.get_raw_index") as mock_idx,
-        patch("services.ingestion.interpret_spreadsheet", new_callable=AsyncMock) as mock_interpret,
-        patch("services.ingestion.usage") as mock_usage,
+        patch("ingest.services.ingestion.get_vectorstore") as mock_vs,
+        patch("ingest.services.ingestion.get_raw_index") as mock_idx,
+        patch("ingest.services.ingestion.interpret_spreadsheet", new_callable=AsyncMock) as mock_interpret,
+        patch("ingest.services.ingestion.usage") as mock_usage,
     ):
         mock_vs.return_value = MagicMock(
             aadd_documents=AsyncMock(return_value=None)
@@ -62,7 +62,7 @@ async def test_ingest_csv_tracks_vision_calls():
         mock_interpret.return_value = "# Sheet interpretation"
         mock_usage.track = AsyncMock()
 
-        from services.ingestion import ingest_spreadsheet
+        from ingest.services.ingestion import ingest_spreadsheet
 
         csv_bytes = b"Name,Score\nAlice,95\nBob,87\n"
 

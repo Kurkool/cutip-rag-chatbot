@@ -42,8 +42,8 @@ class TestCreateUser:
         mock_fb_user.uid = "new-uid-001"
 
         with (
-            patch("routers.users._init_firebase"),
-            patch("routers.users.firebase_auth.create_user", return_value=mock_fb_user),
+            patch("admin.routers.users._init_firebase"),
+            patch("admin.routers.users.firebase_auth.create_user", return_value=mock_fb_user),
         ):
             res = await client.post(
                 "/api/users",
@@ -112,8 +112,8 @@ class TestUpdateUser:
 class TestDeleteUser:
     async def test_delete_success(self, client):
         with (
-            patch("routers.users._init_firebase"),
-            patch("routers.users.firebase_auth.delete_user"),
+            patch("admin.routers.users._init_firebase"),
+            patch("admin.routers.users.firebase_auth.delete_user"),
         ):
             res = await client.delete(
                 "/api/users/faculty-uid-001",

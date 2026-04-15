@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from services.dependencies import fix_filename, format_history, parse_file_extension
+from shared.services.dependencies import fix_filename, format_history, parse_file_extension
 
 
 class TestParseFileExtension:
@@ -56,14 +56,14 @@ class TestFormatHistory:
 
 class TestRateLimitKeyFunc:
     def test_tenant_from_path(self):
-        from services.rate_limit import _get_tenant_from_path
+        from shared.services.rate_limit import _get_tenant_from_path
 
         request = MagicMock()
         request.url.path = "/api/tenants/my_tenant/ingest/document"
         assert _get_tenant_from_path(request) == "tenant:my_tenant"
 
     def test_tenant_from_path_no_match(self):
-        from services.rate_limit import _get_tenant_from_path
+        from shared.services.rate_limit import _get_tenant_from_path
 
         request = MagicMock()
         request.url.path = "/health"

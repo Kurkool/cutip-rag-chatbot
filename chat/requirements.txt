@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+langchain-anthropic
+langchain-core
+langgraph
+langchain-pinecone
+langchain-experimental
+langchain-cohere
+cohere
+pinecone
+rank-bm25
+httpx
+slowapi
+pydantic-settings
+google-cloud-firestore
+firebase-admin

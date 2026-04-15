@@ -1,0 +1,30 @@
+services:
+  chat:
+    build:
+      context: .
+      dockerfile: chat/Dockerfile
+    ports:
+      - "8001:8000"
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+
+  ingest:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    ports:
+      - "8002:8000"
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app
+
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    ports:
+      - "8003:8000"
+    env_file: .env
+    environment:
+      - PYTHONPATH=/app

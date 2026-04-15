@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from schemas import (
+from shared.schemas import (
     AdminUserCreate,
     AdminUserUpdate,
     ChatRequest,

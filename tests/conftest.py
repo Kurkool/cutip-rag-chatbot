@@ -360,33 +360,33 @@ async def mock_update_onboarding_status(tenant_id: str, steps: list) -> dict | N
 # ──────────────────────────────────────
 
 _FIRESTORE_PATCHES = {
-    "services.firestore.get_tenant": mock_get_tenant,
-    "services.firestore.list_tenants": mock_list_tenants,
-    "services.firestore.create_tenant": mock_create_tenant,
-    "services.firestore.update_tenant": mock_update_tenant,
-    "services.firestore.delete_tenant": mock_delete_tenant,
-    "services.firestore.get_admin_user": mock_get_admin_user,
-    "services.firestore.list_admin_users": mock_list_admin_users,
-    "services.firestore.create_admin_user": mock_create_admin_user,
-    "services.firestore.update_admin_user": mock_update_admin_user,
-    "services.firestore.delete_admin_user": mock_delete_admin_user,
-    "services.firestore.count_admin_users": mock_count_admin_users,
-    "services.firestore.log_chat": mock_log_chat,
-    "services.firestore.get_chat_logs": mock_get_chat_logs,
-    "services.firestore.get_analytics": mock_get_analytics,
-    "services.firestore.export_user_data": mock_export_user_data,
-    "services.firestore.delete_user_data": mock_delete_user_data,
-    "services.firestore.anonymize_user_data": mock_anonymize_user_data,
-    "services.firestore.cleanup_expired_data": mock_cleanup_expired_data,
-    "services.firestore.record_consent": mock_record_consent,
-    "services.firestore.get_user_consents": mock_get_user_consents,
-    "services.firestore.revoke_consent": mock_revoke_consent,
-    "services.firestore.create_registration": mock_create_registration,
-    "services.firestore.list_registrations": mock_list_registrations,
-    "services.firestore.get_registration": mock_get_registration,
-    "services.firestore.update_registration": mock_update_registration,
-    "services.firestore.get_onboarding_status": mock_get_onboarding_status,
-    "services.firestore.update_onboarding_status": mock_update_onboarding_status,
+    "shared.services.firestore.get_tenant": mock_get_tenant,
+    "shared.services.firestore.list_tenants": mock_list_tenants,
+    "shared.services.firestore.create_tenant": mock_create_tenant,
+    "shared.services.firestore.update_tenant": mock_update_tenant,
+    "shared.services.firestore.delete_tenant": mock_delete_tenant,
+    "shared.services.firestore.get_admin_user": mock_get_admin_user,
+    "shared.services.firestore.list_admin_users": mock_list_admin_users,
+    "shared.services.firestore.create_admin_user": mock_create_admin_user,
+    "shared.services.firestore.update_admin_user": mock_update_admin_user,
+    "shared.services.firestore.delete_admin_user": mock_delete_admin_user,
+    "shared.services.firestore.count_admin_users": mock_count_admin_users,
+    "shared.services.firestore.log_chat": mock_log_chat,
+    "shared.services.firestore.get_chat_logs": mock_get_chat_logs,
+    "shared.services.firestore.get_analytics": mock_get_analytics,
+    "shared.services.firestore.export_user_data": mock_export_user_data,
+    "shared.services.firestore.delete_user_data": mock_delete_user_data,
+    "shared.services.firestore.anonymize_user_data": mock_anonymize_user_data,
+    "shared.services.firestore.cleanup_expired_data": mock_cleanup_expired_data,
+    "shared.services.firestore.record_consent": mock_record_consent,
+    "shared.services.firestore.get_user_consents": mock_get_user_consents,
+    "shared.services.firestore.revoke_consent": mock_revoke_consent,
+    "shared.services.firestore.create_registration": mock_create_registration,
+    "shared.services.firestore.list_registrations": mock_list_registrations,
+    "shared.services.firestore.get_registration": mock_get_registration,
+    "shared.services.firestore.update_registration": mock_update_registration,
+    "shared.services.firestore.get_onboarding_status": mock_get_onboarding_status,
+    "shared.services.firestore.update_onboarding_status": mock_update_onboarding_status,
 }
 
 
@@ -416,8 +416,8 @@ def _patch_firebase_auth():
         raise HTTPException(status_code=401, detail="Invalid token")
 
     with (
-        patch("services.auth._init_firebase"),
-        patch("services.auth._verify_id_token", side_effect=fake_verify),
+        patch("shared.services.auth._init_firebase"),
+        patch("shared.services.auth._verify_id_token", side_effect=fake_verify),
     ):
         yield
 
@@ -426,17 +426,17 @@ def _patch_firebase_auth():
 def _patch_startup():
     """Skip heavy startup (embedding, vectorstore, reranker)."""
     with (
-        patch("services.embedding.get_embedding_model"),
-        patch("services.vectorstore.get_vectorstore"),
-        patch("services.vectorstore.get_raw_index"),
-        patch("services.reranker.get_reranker"),
+        patch("shared.services.embedding.get_embedding_model"),
+        patch("shared.services.vectorstore.get_vectorstore"),
+        patch("shared.services.vectorstore.get_raw_index"),
+        patch("chat.services.reranker.get_reranker"),
     ):
         yield
 
 
 @pytest.fixture
 def app():
-    from main import app as fastapi_app
+    from admin.main import app as fastapi_app
     return fastapi_app
 
 
