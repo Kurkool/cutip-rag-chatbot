@@ -1,18 +1,17 @@
 """Agentic RAG pipeline — Claude decides what tools to use and when."""
 
 import logging
-from functools import lru_cache
 
 from anthropic import (
     APIStatusError,
     AuthenticationError,
     RateLimitError,
 )
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 
 from shared.config import settings
+from shared.services.llm import get_opus
 from shared.services.dependencies import format_history
 from shared.services.usage import track as track_usage
 from chat.services.memory import conversation_memory
@@ -57,15 +56,7 @@ Source documents are displayed separately. Do NOT append "📎 เอกสา�
 {history}"""
 
 
-@lru_cache()
-def _get_llm() -> ChatAnthropic:
-    return ChatAnthropic(
-        model=settings.LLM_MODEL,
-        anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        temperature=0.1,
-        max_tokens=8192,
-        max_retries=3,  # Auto-retry on 429 with exponential backoff
-    )
+_get_llm = get_opus  # Cached Claude Opus for agentic reasoning
 
 
 async def run_agent(

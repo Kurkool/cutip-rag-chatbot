@@ -12,7 +12,7 @@ from langchain_core.documents import Document
 
 
 def test_build_section_map_from_headers():
-    from ingest.services.ingestion import _build_section_map
+    from ingest.services.enrichment import _build_section_map
     text = "# Curriculum\n\nDetails about curriculum here.\n\n## Tuition\n\nTuition is 21,000 baht.\n\n## Schedule\n\nMonday 9-12"
     sections = _build_section_map(text)
     assert len(sections) >= 2
@@ -21,7 +21,7 @@ def test_build_section_map_from_headers():
 
 
 def test_build_section_map_no_headers():
-    from ingest.services.ingestion import _build_section_map
+    from ingest.services.enrichment import _build_section_map
     text = "Plain text without any headers. Just content."
     sections = _build_section_map(text)
     assert len(sections) == 1
@@ -30,7 +30,7 @@ def test_build_section_map_no_headers():
 
 def test_build_section_map_text_content():
     """Each section's 'text' field should contain that section's content."""
-    from ingest.services.ingestion import _build_section_map
+    from ingest.services.enrichment import _build_section_map
     text = "# Intro\n\nThis is intro content.\n\n# Fees\n\nFees are 21000 baht."
     sections = _build_section_map(text)
     assert len(sections) >= 2
@@ -42,7 +42,7 @@ def test_build_section_map_text_content():
 
 def test_build_section_map_text_truncated_at_3000():
     """Section text should be capped at 3000 chars."""
-    from ingest.services.ingestion import _build_section_map
+    from ingest.services.enrichment import _build_section_map
     long_body = "word " * 1000  # ~5000 chars
     text = f"# BigSection\n\n{long_body}"
     sections = _build_section_map(text)
@@ -52,7 +52,7 @@ def test_build_section_map_text_truncated_at_3000():
 
 def test_build_section_map_no_headers_full_text_truncated():
     """Fallback Document section also truncates text to 3000 chars."""
-    from ingest.services.ingestion import _build_section_map
+    from ingest.services.enrichment import _build_section_map
     long_text = "x " * 2000  # ~4000 chars
     sections = _build_section_map(long_text)
     assert len(sections) == 1
@@ -61,7 +61,7 @@ def test_build_section_map_no_headers_full_text_truncated():
 
 
 def test_find_section_for_chunk_basic():
-    from ingest.services.ingestion import _build_section_map, _find_section_for_chunk
+    from ingest.services.enrichment import _build_section_map, _find_section_for_chunk
     full_text = "# Curriculum\n\nLong text\n\n## Tuition\n\nTuition is 21,000 baht per semester"
     sections = _build_section_map(full_text)
     chunk_text = "Tuition is 21,000 baht per semester"
@@ -71,7 +71,7 @@ def test_find_section_for_chunk_basic():
 
 def test_find_section_for_chunk_falls_back_to_first():
     """When chunk is not found in text, return first section."""
-    from ingest.services.ingestion import _build_section_map, _find_section_for_chunk
+    from ingest.services.enrichment import _build_section_map, _find_section_for_chunk
     full_text = "# Intro\n\nSome intro.\n\n# Body\n\nSome body."
     sections = _build_section_map(full_text)
     section = _find_section_for_chunk(sections, "completely missing text", full_text)
@@ -82,12 +82,12 @@ def test_find_section_for_chunk_falls_back_to_first():
 
 @pytest.mark.asyncio
 async def test_enrich_uses_section_context():
-    with patch("ingest.services.ingestion.ChatAnthropic") as MockLLM:
+    with patch("ingest.services.enrichment.get_haiku_precise") as MockLLM:
         mock_instance = MagicMock()
         mock_instance.ainvoke = AsyncMock(return_value=MagicMock(content="Context about tuition"))
-        MockLLM.return_value = mock_instance
+        MockLLM.return_value = mock_instance  # get_haiku_precise() returns the mock
 
-        from ingest.services.ingestion import _enrich_with_context
+        from ingest.services.enrichment import _enrich_with_context
         full_text = "# Curriculum\n\nLong text\n\n## Tuition\n\nTuition is 21,000 baht per semester"
         chunks = [Document(page_content="Tuition is 21,000 baht per semester", metadata={})]
         enriched = await _enrich_with_context(chunks, full_text)
@@ -98,12 +98,12 @@ async def test_enrich_uses_section_context():
 
 @pytest.mark.asyncio
 async def test_enrich_fallback_global_when_no_headers():
-    with patch("ingest.services.ingestion.ChatAnthropic") as MockLLM:
+    with patch("ingest.services.enrichment.get_haiku_precise") as MockLLM:
         mock_instance = MagicMock()
         mock_instance.ainvoke = AsyncMock(return_value=MagicMock(content="Global context"))
-        MockLLM.return_value = mock_instance
+        MockLLM.return_value = mock_instance  # get_haiku_precise() returns the mock
 
-        from ingest.services.ingestion import _enrich_with_context
+        from ingest.services.enrichment import _enrich_with_context
         full_text = "Plain text without headers. Just a bunch of content about various topics."
         chunks = [Document(page_content="Just a bunch of content", metadata={})]
         enriched = await _enrich_with_context(chunks, full_text)
@@ -113,7 +113,7 @@ async def test_enrich_fallback_global_when_no_headers():
 
 @pytest.mark.asyncio
 async def test_enrich_empty_chunks_returns_empty():
-    from ingest.services.ingestion import _enrich_with_context
+    from ingest.services.enrichment import _enrich_with_context
     result = await _enrich_with_context([], "some text")
     assert result == []
 
@@ -121,12 +121,12 @@ async def test_enrich_empty_chunks_returns_empty():
 @pytest.mark.asyncio
 async def test_enrich_skips_chunk_on_llm_failure():
     """If LLM raises, the chunk should be kept with original content (not crash)."""
-    with patch("ingest.services.ingestion.ChatAnthropic") as MockLLM:
+    with patch("ingest.services.enrichment.get_haiku_precise") as MockLLM:
         mock_instance = MagicMock()
         mock_instance.ainvoke = AsyncMock(side_effect=Exception("API error"))
-        MockLLM.return_value = mock_instance
+        MockLLM.return_value = mock_instance  # get_haiku_precise() returns the mock
 
-        from ingest.services.ingestion import _enrich_with_context
+        from ingest.services.enrichment import _enrich_with_context
         full_text = "# Section\n\nSome content here."
         chunks = [Document(page_content="Some content here.", metadata={"key": "value"})]
         enriched = await _enrich_with_context(chunks, full_text)
@@ -142,7 +142,7 @@ async def test_enrich_uses_section_prompt_format():
     """Section prompt should include section title, not full document."""
     captured_calls = []
 
-    with patch("ingest.services.ingestion.ChatAnthropic") as MockLLM:
+    with patch("ingest.services.enrichment.get_haiku_precise") as MockLLM:
         mock_instance = MagicMock()
 
         async def capture_invoke(prompt):
@@ -150,9 +150,9 @@ async def test_enrich_uses_section_prompt_format():
             return MagicMock(content="Section context")
 
         mock_instance.ainvoke = capture_invoke
-        MockLLM.return_value = mock_instance
+        MockLLM.return_value = mock_instance  # get_haiku_precise() returns the mock
 
-        from ingest.services.ingestion import _enrich_with_context
+        from ingest.services.enrichment import _enrich_with_context
         full_text = "# Admissions\n\nApplication details.\n\n## Requirements\n\nGPA must be 3.0"
         chunks = [Document(page_content="GPA must be 3.0", metadata={})]
         await _enrich_with_context(chunks, full_text)
@@ -170,13 +170,13 @@ async def test_enrich_batches_pause_every_10():
     async def fake_sleep(secs):
         sleep_calls.append(secs)
 
-    with patch("ingest.services.ingestion.ChatAnthropic") as MockLLM:
+    with patch("ingest.services.enrichment.get_haiku_precise") as MockLLM:
         mock_instance = MagicMock()
         mock_instance.ainvoke = AsyncMock(return_value=MagicMock(content="ctx"))
-        MockLLM.return_value = mock_instance
+        MockLLM.return_value = mock_instance  # get_haiku_precise() returns the mock
 
         with patch("ingest.services.ingestion.asyncio.sleep", side_effect=fake_sleep):
-            from ingest.services.ingestion import _enrich_with_context
+            from ingest.services.enrichment import _enrich_with_context
             import importlib
             import ingest.services.ingestion as ing_mod
             importlib.reload(ing_mod)

@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from google.cloud import firestore as fs
-from langchain_anthropic import ChatAnthropic
 
 from shared.config import settings
+from shared.services.llm import get_haiku_precise
 from shared.services.firestore import get_db, CONVERSATIONS_COLLECTION
 
 logger = logging.getLogger(__name__)
@@ -86,12 +86,7 @@ class ConversationMemory:
 
         prompt = _SUMMARIZE_PROMPT.format(conversation=conversation_text)
         try:
-            llm = ChatAnthropic(
-                model=settings.VISION_MODEL,
-                anthropic_api_key=settings.ANTHROPIC_API_KEY,
-                max_tokens=200,
-                temperature=0,
-            )
+            llm = get_haiku_precise()
             response = llm.invoke(prompt)
             return response.content
         except Exception as exc:

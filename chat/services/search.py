@@ -2,12 +2,10 @@
 
 import json
 import logging
-from functools import lru_cache
-
-from langchain_anthropic import ChatAnthropic
 from langchain_core.documents import Document
 
 from shared.config import settings
+from shared.services.llm import get_haiku
 from chat.services.bm25 import get_bm25_index
 from chat.services.reranker import rerank_with_scores, format_with_confidence
 from shared.services.vectorstore import get_vectorstore
@@ -32,15 +30,7 @@ _MULTI_QUERY_PROMPT = (
 )
 
 
-@lru_cache()
-def _get_haiku():
-    return ChatAnthropic(
-        model=settings.VISION_MODEL,
-        anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        temperature=0.3,
-        max_tokens=150,
-        max_retries=2,
-    )
+_get_haiku = get_haiku  # Cached Claude Haiku for multi-query + decomposition
 
 
 async def search(query: str, namespace: str, category: str | None = None) -> str:

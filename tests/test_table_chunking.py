@@ -4,7 +4,7 @@ Tests are written BEFORE the implementation — they should all fail initially.
 """
 import pytest
 from langchain_core.documents import Document
-from ingest.services.ingestion import _fix_table_boundaries
+from ingest.services.chunking import _fix_table_boundaries
 
 
 def test_incomplete_table_merged_with_next_chunk():

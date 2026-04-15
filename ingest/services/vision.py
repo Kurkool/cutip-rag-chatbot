@@ -3,10 +3,10 @@
 import base64
 import logging
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 
 from shared.config import settings
+from shared.services.llm import get_haiku_vision
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +38,7 @@ _INTERPRET_SPREADSHEET_PROMPT = (
 )
 
 
-def _get_vision_llm() -> ChatAnthropic:
-    return ChatAnthropic(
-        model=settings.VISION_MODEL,
-        anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        temperature=0,
-        max_tokens=4096,
-        max_retries=3,
-    )
+_get_vision_llm = get_haiku_vision  # Cached Claude Haiku for Vision
 
 
 async def parse_page_image(image_bytes: bytes) -> str:

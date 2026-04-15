@@ -7,7 +7,7 @@ asyncio.to_thread() to avoid blocking the async event loop.
 import asyncio
 import hashlib
 from datetime import datetime, timedelta, timezone
-from functools import lru_cache
+from functools import lru_cache, wraps
 from typing import Any
 
 from google.cloud import firestore
@@ -359,88 +359,53 @@ def _count_admin_users_sync() -> int:
 
 
 # ──────────────────────────────────────
-# Async wrappers (non-blocking)
+# Async wrapper generator
 # ──────────────────────────────────────
 
-async def create_tenant(data: dict[str, Any]) -> dict[str, Any]:
-    return await asyncio.to_thread(_create_tenant_sync, data)
+def _async_wrap(sync_fn):
+    """Create an async wrapper that runs sync_fn in a thread pool."""
+    @wraps(sync_fn)
+    async def wrapper(*args, **kwargs):
+        return await asyncio.to_thread(sync_fn, *args, **kwargs)
+    # Strip _sync suffix and leading _ for the public name
+    wrapper.__name__ = sync_fn.__name__.replace("_sync", "").lstrip("_")
+    return wrapper
 
-async def get_tenant(tenant_id: str) -> dict[str, Any] | None:
-    return await asyncio.to_thread(_get_tenant_sync, tenant_id)
 
-async def get_tenant_by_destination(line_destination: str) -> dict[str, Any] | None:
-    return await asyncio.to_thread(_get_tenant_by_destination_sync, line_destination)
+# Tenants
+create_tenant = _async_wrap(_create_tenant_sync)
+get_tenant = _async_wrap(_get_tenant_sync)
+get_tenant_by_destination = _async_wrap(_get_tenant_by_destination_sync)
+list_tenants = _async_wrap(_list_tenants_sync)
+update_tenant = _async_wrap(_update_tenant_sync)
+delete_tenant = _async_wrap(_delete_tenant_sync)
 
-async def list_tenants() -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_list_tenants_sync)
-
-async def update_tenant(tenant_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
-    return await asyncio.to_thread(_update_tenant_sync, tenant_id, data)
-
-async def delete_tenant(tenant_id: str) -> bool:
-    return await asyncio.to_thread(_delete_tenant_sync, tenant_id)
-
-async def log_chat(
-    tenant_id: str, user_id: str, query: str, answer: str,
-    sources: list[dict[str, Any]],
-) -> str:
-    return await asyncio.to_thread(_log_chat_sync, tenant_id, user_id, query, answer, sources)
-
-async def get_chat_logs(
-    tenant_id: str, limit: int = 50, offset: int = 0,
-) -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_get_chat_logs_sync, tenant_id, limit, offset)
-
-async def get_analytics(tenant_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(_get_analytics_sync, tenant_id)
-
+# Chat Logs & Analytics
+log_chat = _async_wrap(_log_chat_sync)
+get_chat_logs = _async_wrap(_get_chat_logs_sync)
+get_analytics = _async_wrap(_get_analytics_sync)
 
 # Admin Users
-
-async def create_admin_user(uid: str, data: dict[str, Any]) -> dict[str, Any]:
-    return await asyncio.to_thread(_create_admin_user_sync, uid, data)
-
-async def get_admin_user(uid: str) -> dict[str, Any] | None:
-    return await asyncio.to_thread(_get_admin_user_sync, uid)
-
-async def list_admin_users() -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_list_admin_users_sync)
-
-async def update_admin_user(uid: str, data: dict[str, Any]) -> dict[str, Any] | None:
-    return await asyncio.to_thread(_update_admin_user_sync, uid, data)
-
-async def delete_admin_user(uid: str) -> bool:
-    return await asyncio.to_thread(_delete_admin_user_sync, uid)
-
-async def count_admin_users() -> int:
-    return await asyncio.to_thread(_count_admin_users_sync)
-
+create_admin_user = _async_wrap(_create_admin_user_sync)
+get_admin_user = _async_wrap(_get_admin_user_sync)
+list_admin_users = _async_wrap(_list_admin_users_sync)
+update_admin_user = _async_wrap(_update_admin_user_sync)
+delete_admin_user = _async_wrap(_delete_admin_user_sync)
+count_admin_users = _async_wrap(_count_admin_users_sync)
 
 # Privacy / PDPA
-
-async def export_user_data(tenant_id: str, user_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(_export_user_data_sync, tenant_id, user_id)
-
-async def delete_user_data(tenant_id: str, user_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(_delete_user_data_sync, tenant_id, user_id)
-
-async def anonymize_user_data(tenant_id: str, user_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(_anonymize_user_data_sync, tenant_id, user_id)
-
-async def cleanup_expired_data(retention_days: int) -> dict[str, Any]:
-    return await asyncio.to_thread(_cleanup_expired_data_sync, retention_days)
-
-async def record_consent(tenant_id: str, user_id: str, consent_type: str, version: str) -> dict[str, Any]:
-    return await asyncio.to_thread(_record_consent_sync, tenant_id, user_id, consent_type, version)
-
-async def get_user_consents(tenant_id: str, user_id: str) -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_get_user_consents_sync, tenant_id, user_id)
-
-async def revoke_consent(tenant_id: str, user_id: str, consent_type: str) -> bool:
-    return await asyncio.to_thread(_revoke_consent_sync, tenant_id, user_id, consent_type)
+export_user_data = _async_wrap(_export_user_data_sync)
+delete_user_data = _async_wrap(_delete_user_data_sync)
+anonymize_user_data = _async_wrap(_anonymize_user_data_sync)
+cleanup_expired_data = _async_wrap(_cleanup_expired_data_sync)
+record_consent = _async_wrap(_record_consent_sync)
+get_user_consents = _async_wrap(_get_user_consents_sync)
+revoke_consent = _async_wrap(_revoke_consent_sync)
 
 
-# Registration / Onboarding
+# ──────────────────────────────────────
+# Registration / Onboarding (sync + async)
+# ──────────────────────────────────────
 
 def _create_registration_sync(data: dict[str, Any]) -> dict[str, Any]:
     db = _get_db()
@@ -496,20 +461,9 @@ def _update_onboarding_status_sync(tenant_id: str, steps: list[int]) -> dict[str
     return {"tenant_id": tenant_id, **doc_ref.get().to_dict()}
 
 
-async def create_registration(data: dict[str, Any]) -> dict[str, Any]:
-    return await asyncio.to_thread(_create_registration_sync, data)
-
-async def list_registrations(status: str = "pending") -> list[dict[str, Any]]:
-    return await asyncio.to_thread(_list_registrations_sync, status)
-
-async def get_registration(reg_id: str) -> dict[str, Any] | None:
-    return await asyncio.to_thread(_get_registration_sync, reg_id)
-
-async def update_registration(reg_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
-    return await asyncio.to_thread(_update_registration_sync, reg_id, data)
-
-async def get_onboarding_status(tenant_id: str) -> list[int]:
-    return await asyncio.to_thread(_get_onboarding_status_sync, tenant_id)
-
-async def update_onboarding_status(tenant_id: str, steps: list[int]) -> dict[str, Any] | None:
-    return await asyncio.to_thread(_update_onboarding_status_sync, tenant_id, steps)
+create_registration = _async_wrap(_create_registration_sync)
+list_registrations = _async_wrap(_list_registrations_sync)
+get_registration = _async_wrap(_get_registration_sync)
+update_registration = _async_wrap(_update_registration_sync)
+get_onboarding_status = _async_wrap(_get_onboarding_status_sync)
+update_onboarding_status = _async_wrap(_update_onboarding_status_sync)

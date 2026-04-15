@@ -29,7 +29,7 @@ def test_format_history_empty():
 
 
 def test_summarize_produces_text():
-    with patch("chat.services.memory.ChatAnthropic") as MockLLM:
+    with patch("chat.services.memory.get_haiku_precise") as MockLLM:
         mock_instance = MagicMock()
         mock_instance.invoke.return_value = MagicMock(
             content="นักศึกษาถามเรื่องค่าเทอมและตารางเรียน"
@@ -47,7 +47,7 @@ def test_summarize_produces_text():
 
 
 def test_summarize_includes_existing_summary():
-    with patch("chat.services.memory.ChatAnthropic") as MockLLM:
+    with patch("chat.services.memory.get_haiku_precise") as MockLLM:
         mock_instance = MagicMock()
         mock_instance.invoke.return_value = MagicMock(content="Updated summary")
         MockLLM.return_value = mock_instance
