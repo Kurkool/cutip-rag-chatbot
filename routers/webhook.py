@@ -54,13 +54,13 @@ async def chat(request: Request, body: ChatRequest):
     tenant = await get_tenant_or_404(body.tenant_id)
     user_id = body.user_id or DEFAULT_USER_ID
 
-    answer = await run_agent(query=body.query, user_id=user_id, tenant=tenant)
+    answer, sources = await run_agent(query=body.query, user_id=user_id, tenant=tenant)
 
     await firestore_service.log_chat(
-        tenant["tenant_id"], user_id, body.query, answer, [],
+        tenant["tenant_id"], user_id, body.query, answer, sources,
     )
 
-    return ChatResponse(answer=answer, sources=[])
+    return ChatResponse(answer=answer, sources=sources)
 
 
 # ──────────────────────────────────────
@@ -100,9 +100,9 @@ async def _handle_message_event(event: dict[str, Any], tenant: dict[str, Any]) -
     logger.info("[%s] user=%s query='%s'", tenant_id, user_id[:8], query[:50])
 
     try:
-        answer = await run_agent(query=query, user_id=user_id, tenant=tenant)
-        await firestore_service.log_chat(tenant_id, user_id, query, answer, [])
-        await reply_flex_message(event["reply_token"], answer, [], token)
+        answer, sources = await run_agent(query=query, user_id=user_id, tenant=tenant)
+        await firestore_service.log_chat(tenant_id, user_id, query, answer, sources)
+        await reply_flex_message(event["reply_token"], answer, sources, token)
         logger.info("[%s] replied %d chars", tenant_id, len(answer))
 
     except Exception as exc:

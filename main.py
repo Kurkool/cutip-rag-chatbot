@@ -16,6 +16,8 @@ from routers import (
     analytics_router,
     backup_router,
     ingestion_router,
+    privacy_router,
+    registration_router,
     tenants_router,
     usage_router,
     users_router,
@@ -127,6 +129,8 @@ app.include_router(ingestion_router)
 app.include_router(analytics_router)
 app.include_router(usage_router)
 app.include_router(backup_router)
+app.include_router(privacy_router)
+app.include_router(registration_router)
 
 
 @app.get("/health", tags=["Health"])

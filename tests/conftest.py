@@ -72,11 +72,17 @@ class FakeFirestore:
         self.tenants: dict[str, dict] = {}
         self.admin_users: dict[str, dict] = {}
         self.chat_logs: list[dict] = []
+        self.conversations: dict[str, dict] = {}
+        self.consents: list[dict] = []
+        self.pending_registrations: dict[str, dict] = {}
 
     def reset(self):
         self.tenants.clear()
         self.admin_users.clear()
         self.chat_logs.clear()
+        self.conversations.clear()
+        self.consents.clear()
+        self.pending_registrations.clear()
 
     def seed(self):
         """Seed with test data."""
@@ -87,6 +93,36 @@ class FakeFirestore:
         self.admin_users = {
             "super-uid-001": {**SUPER_ADMIN},
             "faculty-uid-001": {**FACULTY_ADMIN},
+        }
+        # Seed chat logs for privacy tests
+        self.chat_logs = [
+            {
+                "tenant_id": "tenant_a", "user_id": "LINE_USER_001",
+                "query": "What courses?", "answer": "CS101",
+                "sources": [], "created_at": datetime(2026, 1, 10, tzinfo=timezone.utc),
+            },
+            {
+                "tenant_id": "tenant_a", "user_id": "LINE_USER_001",
+                "query": "Tuition fee?", "answer": "50000 THB",
+                "sources": [], "created_at": datetime(2026, 1, 15, tzinfo=timezone.utc),
+            },
+            {
+                "tenant_id": "tenant_a", "user_id": "LINE_USER_002",
+                "query": "Schedule?", "answer": "Mon-Fri",
+                "sources": [], "created_at": datetime(2026, 1, 12, tzinfo=timezone.utc),
+            },
+            {   # Old log for retention test (200 days ago)
+                "tenant_id": "tenant_a", "user_id": "LINE_USER_003",
+                "query": "Old question", "answer": "Old answer",
+                "sources": [], "created_at": datetime(2025, 9, 1, tzinfo=timezone.utc),
+            },
+        ]
+        # Seed conversations
+        self.conversations = {
+            "LINE_USER_001": {
+                "turns": [{"query": "Hi", "answer": "Hello!"}],
+                "last_active": datetime(2026, 1, 15, tzinfo=timezone.utc),
+            },
         }
 
 
@@ -178,9 +214,181 @@ async def mock_get_analytics(tenant_id) -> dict:
     }
 
 
+async def mock_export_user_data(tenant_id: str, user_id: str) -> dict:
+    logs = [
+        {"id": f"log-{i}", **l}
+        for i, l in enumerate(fake_db.chat_logs)
+        if l["tenant_id"] == tenant_id and l["user_id"] == user_id
+    ]
+    conversation = fake_db.conversations.get(user_id)
+    consents = [
+        c for c in fake_db.consents
+        if c["tenant_id"] == tenant_id and c["user_id"] == user_id
+    ]
+    return {
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "chat_logs": logs,
+        "conversation_memory": conversation,
+        "consents": consents,
+    }
+
+
+async def mock_delete_user_data(tenant_id: str, user_id: str) -> dict:
+    before = len(fake_db.chat_logs)
+    fake_db.chat_logs = [
+        l for l in fake_db.chat_logs
+        if not (l["tenant_id"] == tenant_id and l["user_id"] == user_id)
+    ]
+    deleted_logs = before - len(fake_db.chat_logs)
+    deleted_conv = 0
+    if user_id in fake_db.conversations:
+        del fake_db.conversations[user_id]
+        deleted_conv = 1
+    before_consents = len(fake_db.consents)
+    fake_db.consents = [
+        c for c in fake_db.consents
+        if not (c["tenant_id"] == tenant_id and c["user_id"] == user_id)
+    ]
+    deleted_consents = before_consents - len(fake_db.consents)
+    return {
+        "deleted_chat_logs": deleted_logs,
+        "deleted_conversations": deleted_conv,
+        "deleted_consents": deleted_consents,
+    }
+
+
+async def mock_anonymize_user_data(tenant_id: str, user_id: str) -> dict:
+    import hashlib
+    anon_id = f"anon_{hashlib.sha256(user_id.encode()).hexdigest()[:12]}"
+    count = 0
+    for log in fake_db.chat_logs:
+        if log["tenant_id"] == tenant_id and log["user_id"] == user_id:
+            log["user_id"] = anon_id
+            count += 1
+    if user_id in fake_db.conversations:
+        fake_db.conversations[anon_id] = fake_db.conversations.pop(user_id)
+    for consent in fake_db.consents:
+        if consent["tenant_id"] == tenant_id and consent["user_id"] == user_id:
+            consent["user_id"] = anon_id
+    return {"anonymized_records": count, "anonymous_id": anon_id}
+
+
+async def mock_cleanup_expired_data(retention_days: int) -> dict:
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    before = len(fake_db.chat_logs)
+    fake_db.chat_logs = [l for l in fake_db.chat_logs if l["created_at"] >= cutoff]
+    return {"deleted_chat_logs": before - len(fake_db.chat_logs)}
+
+
+async def mock_record_consent(tenant_id: str, user_id: str, consent_type: str, version: str) -> dict:
+    now = datetime.now(timezone.utc)
+    consent = {
+        "tenant_id": tenant_id, "user_id": user_id,
+        "consent_type": consent_type, "version": version,
+        "granted_at": now,
+    }
+    fake_db.consents.append(consent)
+    return {"id": f"consent-{len(fake_db.consents)}", **consent}
+
+
+async def mock_get_user_consents(tenant_id: str, user_id: str) -> list:
+    return [
+        c for c in fake_db.consents
+        if c["tenant_id"] == tenant_id and c["user_id"] == user_id
+    ]
+
+
+async def mock_revoke_consent(tenant_id: str, user_id: str, consent_type: str) -> bool:
+    before = len(fake_db.consents)
+    fake_db.consents = [
+        c for c in fake_db.consents
+        if not (c["tenant_id"] == tenant_id and c["user_id"] == user_id and c["consent_type"] == consent_type)
+    ]
+    return len(fake_db.consents) < before
+
+
+# Registration mocks
+
+async def mock_create_registration(data: dict) -> dict:
+    now = datetime.now(timezone.utc)
+    reg_id = f"reg-{len(fake_db.pending_registrations) + 1:03d}"
+    doc = {
+        "id": reg_id, **data,
+        "status": "pending",
+        "created_at": now,
+    }
+    fake_db.pending_registrations[reg_id] = doc
+    return doc
+
+
+async def mock_list_registrations(status: str = "pending") -> list:
+    return [
+        r for r in fake_db.pending_registrations.values()
+        if r["status"] == status
+    ]
+
+
+async def mock_get_registration(reg_id: str) -> dict | None:
+    return fake_db.pending_registrations.get(reg_id)
+
+
+async def mock_update_registration(reg_id: str, data: dict) -> dict | None:
+    if reg_id not in fake_db.pending_registrations:
+        return None
+    fake_db.pending_registrations[reg_id].update(data)
+    return fake_db.pending_registrations[reg_id]
+
+
+async def mock_get_onboarding_status(tenant_id: str) -> list:
+    tenant = fake_db.tenants.get(tenant_id)
+    if not tenant:
+        return []
+    return tenant.get("onboarding_completed", [])
+
+
+async def mock_update_onboarding_status(tenant_id: str, steps: list) -> dict | None:
+    if tenant_id not in fake_db.tenants:
+        return None
+    fake_db.tenants[tenant_id]["onboarding_completed"] = steps
+    return fake_db.tenants[tenant_id]
+
+
 # ──────────────────────────────────────
 # Fixtures
 # ──────────────────────────────────────
+
+_FIRESTORE_PATCHES = {
+    "services.firestore.get_tenant": mock_get_tenant,
+    "services.firestore.list_tenants": mock_list_tenants,
+    "services.firestore.create_tenant": mock_create_tenant,
+    "services.firestore.update_tenant": mock_update_tenant,
+    "services.firestore.delete_tenant": mock_delete_tenant,
+    "services.firestore.get_admin_user": mock_get_admin_user,
+    "services.firestore.list_admin_users": mock_list_admin_users,
+    "services.firestore.create_admin_user": mock_create_admin_user,
+    "services.firestore.update_admin_user": mock_update_admin_user,
+    "services.firestore.delete_admin_user": mock_delete_admin_user,
+    "services.firestore.count_admin_users": mock_count_admin_users,
+    "services.firestore.log_chat": mock_log_chat,
+    "services.firestore.get_chat_logs": mock_get_chat_logs,
+    "services.firestore.get_analytics": mock_get_analytics,
+    "services.firestore.export_user_data": mock_export_user_data,
+    "services.firestore.delete_user_data": mock_delete_user_data,
+    "services.firestore.anonymize_user_data": mock_anonymize_user_data,
+    "services.firestore.cleanup_expired_data": mock_cleanup_expired_data,
+    "services.firestore.record_consent": mock_record_consent,
+    "services.firestore.get_user_consents": mock_get_user_consents,
+    "services.firestore.revoke_consent": mock_revoke_consent,
+    "services.firestore.create_registration": mock_create_registration,
+    "services.firestore.list_registrations": mock_list_registrations,
+    "services.firestore.get_registration": mock_get_registration,
+    "services.firestore.update_registration": mock_update_registration,
+    "services.firestore.get_onboarding_status": mock_get_onboarding_status,
+    "services.firestore.update_onboarding_status": mock_update_onboarding_status,
+}
+
 
 @pytest.fixture(autouse=True)
 def _patch_firestore():
@@ -188,23 +396,12 @@ def _patch_firestore():
     fake_db.reset()
     fake_db.seed()
 
-    with (
-        patch("services.firestore.get_tenant", side_effect=mock_get_tenant),
-        patch("services.firestore.list_tenants", side_effect=mock_list_tenants),
-        patch("services.firestore.create_tenant", side_effect=mock_create_tenant),
-        patch("services.firestore.update_tenant", side_effect=mock_update_tenant),
-        patch("services.firestore.delete_tenant", side_effect=mock_delete_tenant),
-        patch("services.firestore.get_admin_user", side_effect=mock_get_admin_user),
-        patch("services.firestore.list_admin_users", side_effect=mock_list_admin_users),
-        patch("services.firestore.create_admin_user", side_effect=mock_create_admin_user),
-        patch("services.firestore.update_admin_user", side_effect=mock_update_admin_user),
-        patch("services.firestore.delete_admin_user", side_effect=mock_delete_admin_user),
-        patch("services.firestore.count_admin_users", side_effect=mock_count_admin_users),
-        patch("services.firestore.log_chat", side_effect=mock_log_chat),
-        patch("services.firestore.get_chat_logs", side_effect=mock_get_chat_logs),
-        patch("services.firestore.get_analytics", side_effect=mock_get_analytics),
-    ):
-        yield
+    patchers = [patch(target, side_effect=fn) for target, fn in _FIRESTORE_PATCHES.items()]
+    for p in patchers:
+        p.start()
+    yield
+    for p in patchers:
+        p.stop()
 
 
 @pytest.fixture(autouse=True)

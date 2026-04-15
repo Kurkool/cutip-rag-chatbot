@@ -83,10 +83,24 @@ async def validate_upload(file: UploadFile, allowed_extensions: set[str]) -> byt
 # Conversation history
 # ──────────────────────────────────────
 
-def format_history(history: list[dict]) -> str:
-    """Format conversation turns into a readable string for the LLM."""
+def format_history(history: list[dict] | dict) -> str:
+    """Format conversation turns into a readable string for the LLM.
+
+    Accepts both the legacy plain list format and the new dict format
+    ``{"summary": str, "turns": list}`` produced when summarization is active.
+    """
     if not history:
         return "ไม่มีประวัติสนทนา"
+
+    if isinstance(history, dict):
+        parts = []
+        if history.get("summary"):
+            parts.append(f"บริบทก่อนหน้า: {history['summary']}")
+        for turn in history.get("turns", []):
+            parts.append(f"นักศึกษา: {turn['query']}")
+            parts.append(f"ผู้ช่วย: {turn['answer']}")
+        return "\n".join(parts) if parts else "ไม่มีประวัติสนทนา"
+
     lines = []
     for turn in history:
         lines.append(f"นักศึกษา: {turn['query']}")

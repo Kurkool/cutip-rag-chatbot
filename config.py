@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:3001",
+        "https://cutip-admin-portal-265709916451.asia-southeast1.run.app",
     ]
 
     # Slack alerting (optional — leave empty to disable)
@@ -50,12 +51,12 @@ class Settings(BaseSettings):
     VISION_MODEL: str = "claude-haiku-4-5-20251001"
 
     # Chunking
-    CHUNK_SIZE: int = 800
-    CHUNK_OVERLAP: int = 150
+    CHUNK_SIZE: int = 1500
+    CHUNK_OVERLAP: int = 200
 
     # Retrieval
     RETRIEVAL_K: int = 10
-    TOP_K: int = 4
+    TOP_K: int = 5
 
     # Conversation Memory
     MAX_HISTORY_TURNS: int = 5
@@ -78,11 +79,20 @@ class Settings(BaseSettings):
         "application/vnd.ms-excel",
     ]
 
+    # PDPA / Privacy
+    RETENTION_DAYS: int = 90  # days to keep chat logs
+
     # Ingestion
     LIBREOFFICE_TIMEOUT: int = 120  # seconds
     PDF_VISION_THRESHOLD: int = 100  # chars — pages below this use Vision
     PDF_BATCH_SIZE: int = 2  # concurrent Vision calls per batch (low to avoid rate limit)
     XLSX_BATCH_ROWS: int = 100  # rows per Claude interpretation batch
+
+    # Semantic Chunking
+    SEMANTIC_CHUNK_PERCENTILE: int = 90
+
+    # BM25
+    BM25_K_CONSTANT: int = 60
 
     model_config = {"env_file": ".env"}
 

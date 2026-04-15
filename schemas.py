@@ -241,3 +241,46 @@ class AnalyticsResponse(BaseModel):
     unique_users: int
     period_start: datetime | None = None
     period_end: datetime | None = None
+
+
+# ──────────────────────────────────────
+# PDPA / Privacy
+# ──────────────────────────────────────
+
+class ConsentRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=100)
+    consent_type: str = Field(..., min_length=1, max_length=50)
+    version: str = Field(default="1.0", max_length=20)
+
+
+class RetentionCleanupRequest(BaseModel):
+    retention_days: int | None = Field(default=None, ge=1, le=3650)
+
+
+# ──────────────────────────────────────
+# Registration / Onboarding
+# ──────────────────────────────────────
+
+class RegistrationRequest(BaseModel):
+    faculty_name: str = Field(..., min_length=1, max_length=200)
+    email: str = Field(..., max_length=254)
+    password: str = Field(..., min_length=8, max_length=128)
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("faculty_name")
+    @classmethod
+    def sanitize_faculty(cls, v: str) -> str:
+        return _strip_dangerous_html(v)
+
+    @field_validator("note")
+    @classmethod
+    def sanitize_note(cls, v: str) -> str:
+        return _strip_dangerous_html(v)
+
+
+class RejectRequest(BaseModel):
+    reason: str = Field(default="", max_length=500)
+
+
+class OnboardingUpdate(BaseModel):
+    completed_steps: list[int] = Field(..., max_length=10)
