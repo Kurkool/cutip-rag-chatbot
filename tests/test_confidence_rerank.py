@@ -4,7 +4,7 @@ from langchain_core.documents import Document
 
 
 def test_rerank_with_scores_returns_tuples():
-    with patch("services.reranker._get_client") as mock_client:
+    with patch("chat.services.reranker._get_client") as mock_client:
         mock_response = MagicMock()
         mock_response.results = [
             MagicMock(index=0, relevance_score=0.85),
@@ -12,7 +12,7 @@ def test_rerank_with_scores_returns_tuples():
         ]
         mock_client.return_value.rerank.return_value = mock_response
 
-        from services.reranker import rerank_with_scores
+        from chat.services.reranker import rerank_with_scores
         docs = [
             Document(page_content="High relevance", metadata={}),
             Document(page_content="Medium relevance", metadata={}),
@@ -24,7 +24,7 @@ def test_rerank_with_scores_returns_tuples():
 
 
 def test_format_with_confidence_high():
-    from services.reranker import format_with_confidence
+    from chat.services.reranker import format_with_confidence
     scored = [(Document(page_content="Content", metadata={"source_filename": "a.pdf"}), 0.85)]
     result = format_with_confidence(scored)
     assert "[HIGH CONFIDENCE]" in result
@@ -32,14 +32,14 @@ def test_format_with_confidence_high():
 
 
 def test_format_with_confidence_medium():
-    from services.reranker import format_with_confidence
+    from chat.services.reranker import format_with_confidence
     scored = [(Document(page_content="Content", metadata={"source_filename": "b.pdf"}), 0.45)]
     result = format_with_confidence(scored)
     assert "[MEDIUM" in result
 
 
 def test_format_with_confidence_filters_low():
-    from services.reranker import format_with_confidence
+    from chat.services.reranker import format_with_confidence
     scored = [
         (Document(page_content="High", metadata={"source_filename": "a.pdf"}), 0.85),
         (Document(page_content="Low", metadata={"source_filename": "c.pdf"}), 0.15),
@@ -50,12 +50,12 @@ def test_format_with_confidence_filters_low():
 
 
 def test_format_with_confidence_all_low():
-    from services.reranker import format_with_confidence
+    from chat.services.reranker import format_with_confidence
     scored = [(Document(page_content="Low", metadata={}), 0.1)]
     result = format_with_confidence(scored)
     assert "No relevant documents" in result
 
 
 def test_rerank_with_scores_empty():
-    from services.reranker import rerank_with_scores
+    from chat.services.reranker import rerank_with_scores
     assert rerank_with_scores("query", [], top_k=5) == []

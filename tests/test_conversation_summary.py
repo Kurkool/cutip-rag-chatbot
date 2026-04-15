@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 
 
 def test_format_history_with_summary():
-    from services.dependencies import format_history
+    from shared.services.dependencies import format_history
     history = {
         "summary": "นักศึกษาถามเรื่องค่าเทอมหลักสูตร 5 ปี",
         "turns": [{"query": "แล้ววิชาเลือกล่ะ", "answer": "มีวิชาเลือก 12 หน่วยกิต"}],
@@ -15,7 +15,7 @@ def test_format_history_with_summary():
 
 
 def test_format_history_list_backward_compat():
-    from services.dependencies import format_history
+    from shared.services.dependencies import format_history
     history = [{"query": "ค่าเทอมเท่าไหร่", "answer": "21,000 บาท"}]
     result = format_history(history)
     assert "ค่าเทอมเท่าไหร่" in result
@@ -23,20 +23,20 @@ def test_format_history_list_backward_compat():
 
 
 def test_format_history_empty():
-    from services.dependencies import format_history
+    from shared.services.dependencies import format_history
     assert format_history([]) == "ไม่มีประวัติสนทนา"
     assert format_history({}) == "ไม่มีประวัติสนทนา"
 
 
 def test_summarize_produces_text():
-    with patch("services.memory.ChatAnthropic") as MockLLM:
+    with patch("chat.services.memory.ChatAnthropic") as MockLLM:
         mock_instance = MagicMock()
         mock_instance.invoke.return_value = MagicMock(
             content="นักศึกษาถามเรื่องค่าเทอมและตารางเรียน"
         )
         MockLLM.return_value = mock_instance
 
-        from services.memory import ConversationMemory
+        from chat.services.memory import ConversationMemory
         mem = ConversationMemory()
         summary = mem._summarize([
             {"query": "q1", "answer": "a1"},
@@ -47,12 +47,12 @@ def test_summarize_produces_text():
 
 
 def test_summarize_includes_existing_summary():
-    with patch("services.memory.ChatAnthropic") as MockLLM:
+    with patch("chat.services.memory.ChatAnthropic") as MockLLM:
         mock_instance = MagicMock()
         mock_instance.invoke.return_value = MagicMock(content="Updated summary")
         MockLLM.return_value = mock_instance
 
-        from services.memory import ConversationMemory
+        from chat.services.memory import ConversationMemory
         mem = ConversationMemory()
         summary = mem._summarize(
             [{"query": "new q", "answer": "new a"}],

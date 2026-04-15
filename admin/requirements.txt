@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pinecone
+langchain-pinecone
+langchain-core
+langchain-cohere
+cohere
+httpx
+slowapi
+pydantic-settings
+google-cloud-firestore
+google-cloud-storage
+firebase-admin

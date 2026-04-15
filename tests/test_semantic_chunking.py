@@ -36,7 +36,7 @@ def _make_fake_embeddings():
 # ---------------------------------------------------------------------------
 
 def test_smart_chunk_returns_documents_with_metadata():
-    from services.ingestion import _smart_chunk
+    from ingest.services.ingestion import _smart_chunk
     text = (
         "# หลักสูตร\n\n"
         "หลักสูตรวิศวกรรมศาสตร์ใช้เวลา 4 ปี ค่าเทอม 21,000 บาท\n\n"
@@ -45,7 +45,7 @@ def test_smart_chunk_returns_documents_with_metadata():
         "## ค่าใช้จ่าย\n\n"
         "ค่าเทอมรวมค่าธรรมเนียมทั้งหมดแล้ว ไม่มีค่าใช้จ่ายเพิ่มเติม"
     )
-    with patch("services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
+    with patch("ingest.services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
         chunks = _smart_chunk(text, source="test.pdf")
     assert len(chunks) >= 1
     assert all(isinstance(c, Document) for c in chunks)
@@ -53,23 +53,23 @@ def test_smart_chunk_returns_documents_with_metadata():
 
 
 def test_smart_chunk_fallback_on_short_text():
-    from services.ingestion import _smart_chunk
+    from ingest.services.ingestion import _smart_chunk
     text = "สั้นมาก short text"
-    with patch("services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
+    with patch("ingest.services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
         chunks = _smart_chunk(text, source="short.pdf")
     assert len(chunks) >= 1
     assert chunks[0].metadata["source_filename"] == "short.pdf"
 
 
 def test_smart_chunk_filters_tiny_chunks():
-    from services.ingestion import _smart_chunk
+    from ingest.services.ingestion import _smart_chunk
     text = (
         "# Section A\n\n"
         + "A detailed content about curriculum. " * 80
         + "\n\n# Section B\n\n"
         + "B detailed content about schedule. " * 80
     )
-    with patch("services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
+    with patch("ingest.services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
         chunks = _smart_chunk(text, source="test.pdf")
     for chunk in chunks:
         assert len(chunk.page_content.strip()) >= 50
@@ -77,9 +77,9 @@ def test_smart_chunk_filters_tiny_chunks():
 
 def test_smart_chunk_falls_back_when_semantic_chunker_raises():
     """If SemanticChunker raises, fallback splitter should be used."""
-    from services.ingestion import _smart_chunk
+    from ingest.services.ingestion import _smart_chunk
 
-    with patch("services.ingestion.get_embedding_model", side_effect=Exception("API down")):
+    with patch("ingest.services.ingestion.get_embedding_model", side_effect=Exception("API down")):
         # Should not raise; fallback RecursiveCharacterTextSplitter takes over
         text = "This is a document with enough content. " * 20
         chunks = _smart_chunk(text, source="fallback.pdf")
@@ -91,13 +91,13 @@ def test_smart_chunk_falls_back_when_semantic_chunker_raises():
 
 def test_smart_chunk_caps_large_chunks():
     """Chunks > 3000 chars should be split further."""
-    from services.ingestion import _smart_chunk
+    from ingest.services.ingestion import _smart_chunk
 
     # Build text whose semantic chunker would return one huge chunk
     long_para = "x" * 3500
     text = long_para
 
-    with patch("services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
+    with patch("ingest.services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
         chunks = _smart_chunk(text, source="big.pdf")
 
     for chunk in chunks:
@@ -106,13 +106,13 @@ def test_smart_chunk_caps_large_chunks():
 
 def test_smart_chunk_header_path_annotation():
     """Chunks should carry their markdown header context as a prefix."""
-    from services.ingestion import _smart_chunk
+    from ingest.services.ingestion import _smart_chunk
 
     text = (
         "# Introduction\n\n"
         "This section introduces the course structure in detail. " * 10
     )
-    with patch("services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
+    with patch("ingest.services.ingestion.get_embedding_model", return_value=_make_fake_embeddings()):
         chunks = _smart_chunk(text, source="header_test.pdf")
 
     # At least one chunk should be annotated with the header path

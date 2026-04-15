@@ -1,6 +1,6 @@
 import pytest
 from langchain_core.documents import Document
-from services.bm25 import BM25Index, get_bm25_index, invalidate_bm25_cache
+from chat.services.bm25 import BM25Index, get_bm25_index, invalidate_bm25_cache
 
 
 def test_bm25_search_finds_exact_keyword():
