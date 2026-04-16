@@ -85,7 +85,8 @@ async def test_search_with_sources_returns_tuple():
         assert sources[0]["confidence"] == "HIGH"
 
 
-def test_hybrid_search_vector_only():
+@pytest.mark.asyncio
+async def test_hybrid_search_vector_only():
     """When BM25 has no matching docs, return vector results."""
     with (
         patch("chat.services.search.get_vectorstore") as mock_vs,
@@ -95,12 +96,11 @@ def test_hybrid_search_vector_only():
         mock_store = MagicMock()
         mock_store.similarity_search.return_value = [doc]
         mock_vs.return_value = mock_store
-        # BM25 has docs but no matches for this query
         mock_bm25_idx = MagicMock()
-        mock_bm25_idx.documents = [doc]  # non-empty so no bootstrap
-        mock_bm25_idx.search.return_value = []  # no BM25 matches
+        mock_bm25_idx.documents = [doc]
+        mock_bm25_idx.search.return_value = []
         mock_bm25.return_value = mock_bm25_idx
 
         from chat.services.search import _hybrid_search
-        results = _hybrid_search("query", "ns")
+        results = await _hybrid_search("query", "ns")
         assert len(results) == 1

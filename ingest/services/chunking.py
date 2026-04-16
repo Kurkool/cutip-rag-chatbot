@@ -1,17 +1,27 @@
-"""Chunking utilities: semantic, markdown-header-aware, and table-safe splitting."""
+"""Chunking utilities: semantic, markdown-header-aware, and table-safe splitting.
+
+``langchain_text_splitters`` package init loads ``sentence_transformers`` →
+``transformers`` → ``torch`` (~5s cold). We defer that import until actually
+needed so modules that merely touch ``ingest.services.*`` (tests, admin
+router imports) don't pay the cost.
+"""
 
 import logging
 import re
+from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from langchain_core.documents import Document
-from langchain_experimental.text_splitter import SemanticChunker
-from langchain_text_splitters import (
-    MarkdownHeaderTextSplitter,
-    RecursiveCharacterTextSplitter,
-)
 
 from shared.config import settings
 from shared.services.embedding import get_embedding_model
+
+if TYPE_CHECKING:
+    from langchain_experimental.text_splitter import SemanticChunker
+    from langchain_text_splitters import (
+        MarkdownHeaderTextSplitter,
+        RecursiveCharacterTextSplitter,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -22,20 +32,28 @@ logger = logging.getLogger(__name__)
 _MAX_CHUNK_CHARS = 3000
 _MIN_CHUNK_CHARS = 50
 
-md_header_splitter = MarkdownHeaderTextSplitter(
-    headers_to_split_on=[
-        ("#", "section"),
-        ("##", "subsection"),
-        ("###", "topic"),
-    ],
-    strip_headers=False,
-)
 
-_fallback_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=settings.CHUNK_SIZE,
-    chunk_overlap=settings.CHUNK_OVERLAP,
-    separators=["\n\n", "\n", "。", ".", " ", ""],
-)
+@lru_cache(maxsize=1)
+def _get_md_header_splitter() -> "MarkdownHeaderTextSplitter":
+    from langchain_text_splitters import MarkdownHeaderTextSplitter
+    return MarkdownHeaderTextSplitter(
+        headers_to_split_on=[
+            ("#", "section"),
+            ("##", "subsection"),
+            ("###", "topic"),
+        ],
+        strip_headers=False,
+    )
+
+
+@lru_cache(maxsize=1)
+def _get_fallback_splitter() -> "RecursiveCharacterTextSplitter":
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    return RecursiveCharacterTextSplitter(
+        chunk_size=settings.CHUNK_SIZE,
+        chunk_overlap=settings.CHUNK_OVERLAP,
+        separators=["\n\n", "\n", "。", ".", " ", ""],
+    )
 
 
 def _build_header_map(text: str) -> list[tuple[int, str]]:
@@ -45,7 +63,7 @@ def _build_header_map(text: str) -> list[tuple[int, str]]:
     maps that back to a character position in the original text so we can
     annotate semantic chunks that land inside that region.
     """
-    header_chunks = md_header_splitter.split_text(text)
+    header_chunks = _get_md_header_splitter().split_text(text)
     position_map: list[tuple[int, str]] = []
     search_start = 0
     for hchunk in header_chunks:
@@ -54,7 +72,6 @@ def _build_header_map(text: str) -> list[tuple[int, str]]:
             for key in ["section", "subsection", "topic"]
             if hchunk.metadata.get(key)
         )
-        # Find where this chunk's content begins in the original text
         snippet = hchunk.page_content[:80].strip()
         if snippet:
             pos = text.find(snippet, search_start)
@@ -78,8 +95,9 @@ def _header_for_position(pos: int, header_map: list[tuple[int, str]]) -> str:
     return result
 
 
-def _make_semantic_chunker() -> SemanticChunker:
+def _make_semantic_chunker() -> "SemanticChunker":
     """Factory: create a SemanticChunker per call (not thread-safe with lru_cache)."""
+    from langchain_experimental.text_splitter import SemanticChunker
     return SemanticChunker(
         embeddings=get_embedding_model(),
         breakpoint_threshold_type="percentile",
@@ -96,11 +114,12 @@ def _smart_chunk(text: str, source: str = "") -> list[Document]:
     4. Remove chunks < 50 chars (after strip).
     5. Annotate each chunk with its markdown header path.
     """
-    # Build header map from markdown structure (works regardless of chunker used)
     try:
         header_map = _build_header_map(text)
     except Exception:
         header_map = []
+
+    fallback = _get_fallback_splitter()
 
     # ── Step 1: Attempt semantic chunking ──────────────────────────────────
     raw_chunks: list[Document] = []
@@ -112,7 +131,7 @@ def _smart_chunk(text: str, source: str = "") -> list[Document]:
 
     # ── Step 2: Fallback if semantic chunking produced nothing ─────────────
     if not raw_chunks:
-        raw_chunks = _fallback_splitter.create_documents(
+        raw_chunks = fallback.create_documents(
             [text], metadatas=[{"source_filename": source}]
         )
 
@@ -120,7 +139,7 @@ def _smart_chunk(text: str, source: str = "") -> list[Document]:
     capped: list[Document] = []
     for chunk in raw_chunks:
         if len(chunk.page_content) > _MAX_CHUNK_CHARS:
-            sub = _fallback_splitter.split_documents([chunk])
+            sub = fallback.split_documents([chunk])
             capped.extend(sub)
         else:
             capped.append(chunk)
@@ -135,7 +154,6 @@ def _smart_chunk(text: str, source: str = "") -> list[Document]:
         if len(content) < _MIN_CHUNK_CHARS:
             continue
 
-        # Determine header path by finding where this chunk starts in original text
         pos = text.find(content[:60]) if len(content) >= 60 else text.find(content)
         if pos == -1:
             pos = 0
@@ -150,7 +168,7 @@ def _smart_chunk(text: str, source: str = "") -> list[Document]:
 
     # Edge case: everything was filtered — return a single fallback chunk
     if not final:
-        return _fallback_splitter.create_documents(
+        return fallback.create_documents(
             [text], metadatas=[{"source_filename": source}]
         )
 
@@ -189,8 +207,6 @@ def _split_large_table(doc: Document) -> list[Document]:
     content = doc.page_content
     lines = content.splitlines(keepends=True)
 
-    # Identify header rows: first '|'-starting line and the immediately
-    # following separator line (contains '---').
     header_lines: list[str] = []
     data_lines: list[str] = []
     found_header = False
@@ -209,7 +225,6 @@ def _split_large_table(doc: Document) -> list[Document]:
 
     header_text = "".join(header_lines)
 
-    # Group data lines into batches of _TABLE_SPLIT_ROWS (only count '|' lines)
     splits: list[Document] = []
     batch: list[str] = []
     row_count = 0
@@ -251,7 +266,6 @@ def _fix_table_boundaries(chunks: list[Document]) -> list[Document]:
     if not chunks:
         return chunks
 
-    # ── Pass 1: merge incomplete table rows ───────────────────────────────
     merged: list[Document] = []
     i = 0
     while i < len(chunks):
@@ -264,12 +278,11 @@ def _fix_table_boundaries(chunks: list[Document]) -> list[Document]:
             combined_content = current.page_content + "\n" + next_doc.page_content
             combined_meta = {**current.metadata, **next_doc.metadata}
             merged.append(Document(page_content=combined_content, metadata=combined_meta))
-            i += 2  # skip the next chunk — it was consumed
+            i += 2
         else:
             merged.append(current)
             i += 1
 
-    # ── Pass 2: split large table chunks + tag metadata ───────────────────
     result: list[Document] = []
     for doc in merged:
         if _chunk_has_table(doc.page_content):

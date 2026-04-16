@@ -3,7 +3,8 @@ from unittest.mock import patch, MagicMock
 from langchain_core.documents import Document
 
 
-def test_rerank_with_scores_returns_tuples():
+@pytest.mark.asyncio
+async def test_rerank_with_scores_returns_tuples():
     with patch("chat.services.reranker._get_client") as mock_client:
         mock_response = MagicMock()
         mock_response.results = [
@@ -17,7 +18,7 @@ def test_rerank_with_scores_returns_tuples():
             Document(page_content="High relevance", metadata={}),
             Document(page_content="Medium relevance", metadata={}),
         ]
-        results = rerank_with_scores("query", docs, top_k=2)
+        results = await rerank_with_scores("query", docs, top_k=2)
         assert len(results) == 2
         assert results[0][1] == 0.85
         assert results[1][1] == 0.45
@@ -56,6 +57,7 @@ def test_format_with_confidence_all_low():
     assert "No relevant documents" in result
 
 
-def test_rerank_with_scores_empty():
+@pytest.mark.asyncio
+async def test_rerank_with_scores_empty():
     from chat.services.reranker import rerank_with_scores
-    assert rerank_with_scores("query", [], top_k=5) == []
+    assert await rerank_with_scores("query", [], top_k=5) == []

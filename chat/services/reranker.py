@@ -1,5 +1,10 @@
-"""Cohere Rerank v3.5 for precision document reranking."""
+"""Cohere Rerank v3.5 for precision document reranking.
 
+Cohere's Python SDK is synchronous. We expose async wrappers that run the
+network call in a thread pool so they do not stall the asyncio event loop.
+"""
+
+import asyncio
 from functools import lru_cache
 
 import cohere
@@ -18,34 +23,32 @@ def get_reranker():
     _get_client()
 
 
-def rerank_documents(
+def _rerank_sync(query: str, docs: list[Document], top_k: int):
+    return _get_client().rerank(
+        model=settings.RERANKER_MODEL,
+        query=query,
+        documents=[doc.page_content for doc in docs],
+        top_n=top_k,
+    )
+
+
+async def rerank_documents(
     query: str, documents: list[Document], top_k: int
 ) -> list[Document]:
     """Re-score documents by relevance using Cohere cross-encoder."""
     if not documents:
         return documents
-
-    response = _get_client().rerank(
-        model=settings.RERANKER_MODEL,
-        query=query,
-        documents=[doc.page_content for doc in documents],
-        top_n=top_k,
-    )
+    response = await asyncio.to_thread(_rerank_sync, query, documents, top_k)
     return [documents[r.index] for r in response.results]
 
 
-def rerank_with_scores(
+async def rerank_with_scores(
     query: str, documents: list[Document], top_k: int
 ) -> list[tuple[Document, float]]:
     """Re-score and return (document, relevance_score) tuples."""
     if not documents:
         return []
-    response = _get_client().rerank(
-        model=settings.RERANKER_MODEL,
-        query=query,
-        documents=[doc.page_content for doc in documents],
-        top_n=top_k,
-    )
+    response = await asyncio.to_thread(_rerank_sync, query, documents, top_k)
     return [(documents[r.index], r.relevance_score) for r in response.results]
 
 

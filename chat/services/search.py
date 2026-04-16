@@ -1,7 +1,9 @@
 """Search orchestrator: decomposition → multi-query → hybrid search → RRF → confidence rerank."""
 
+import asyncio
 import json
 import logging
+import re
 from langchain_core.documents import Document
 
 from shared.config import settings
@@ -11,6 +13,14 @@ from chat.services.reranker import rerank_with_scores, format_with_confidence
 from shared.services.vectorstore import get_vectorstore
 
 logger = logging.getLogger(__name__)
+
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+
+
+def _strip_json_fence(text: str) -> str:
+    stripped = text.strip()
+    stripped = _JSON_FENCE_RE.sub("", stripped)
+    return stripped.strip()
 
 # Dedup key: first N chars of chunk content used to identify unique documents
 _DEDUP_PREFIX_LEN = 200
@@ -52,7 +62,7 @@ async def search_with_sources(
     for sq in sub_queries:
         variants = await _generate_query_variants(sq)
         for v in variants:
-            results = _hybrid_search(v, namespace, category=category, k=10)
+            results = await _hybrid_search(v, namespace, category=category, k=10)
             for doc in results:
                 key = doc.page_content[:_DEDUP_PREFIX_LEN]
                 if key not in seen:
@@ -63,7 +73,7 @@ async def search_with_sources(
         return "No relevant documents found for this query.", []
 
     # Step 3: Rerank with confidence scores
-    scored = rerank_with_scores(query, all_docs, top_k=settings.TOP_K)
+    scored = await rerank_with_scores(query, all_docs, top_k=settings.TOP_K)
 
     # Step 4: Format and extract sources
     formatted = format_with_confidence(scored)
@@ -87,12 +97,12 @@ async def _decompose_query(query: str) -> list[str]:
     try:
         llm = _get_haiku()
         result = await llm.ainvoke(_DECOMPOSE_PROMPT.format(query=query))
-        parsed = json.loads(result.content.strip())
+        parsed = json.loads(_strip_json_fence(result.content))
         if parsed.get("type") == "complex" and parsed.get("sub_queries"):
             return parsed["sub_queries"][:3]
         return [parsed.get("query", query)]
-    except Exception:
-        logger.debug("Query decomposition failed, using original query")
+    except Exception as exc:
+        logger.info("Query decomposition failed (%s), using original query", exc)
         return [query]
 
 
@@ -102,34 +112,44 @@ async def _generate_query_variants(query: str) -> list[str]:
     try:
         llm = _get_haiku()
         result = await llm.ainvoke(_MULTI_QUERY_PROMPT.format(query=query))
-        parsed = json.loads(result.content.strip())
+        parsed = json.loads(_strip_json_fence(result.content))
         if isinstance(parsed, list):
             variants.extend(parsed[:2])
-    except Exception:
-        logger.debug("Multi-query generation failed, using original only")
+    except Exception as exc:
+        logger.info("Multi-query generation failed (%s), using original only", exc)
     return variants
 
 
-def _hybrid_search(
-    query: str, namespace: str, category: str | None = None, k: int = 10
-) -> list[Document]:
-    """Combine vector search + BM25 keyword search via RRF."""
-    vectorstore = get_vectorstore(namespace)
-
-    # Vector search
-    filter_dict = {"doc_category": category} if category else None
+def _vector_search_sync(query: str, namespace: str, k: int, filter_dict) -> list[Document]:
     try:
-        vector_results = vectorstore.similarity_search(query, k=k, filter=filter_dict)
+        return get_vectorstore(namespace).similarity_search(query, k=k, filter=filter_dict)
     except Exception:
         logger.warning("Vector search failed")
-        vector_results = []
+        return []
+
+
+async def _hybrid_search(
+    query: str, namespace: str, category: str | None = None, k: int = 10
+) -> list[Document]:
+    """Combine vector search + BM25 keyword search via RRF.
+
+    Vector search (network I/O) and BM25 scoring (CPU-bound on large corpora)
+    both block, so we fan them out to the thread pool concurrently.
+    """
+    filter_dict = {"doc_category": category} if category else None
+    vector_results = await asyncio.to_thread(
+        _vector_search_sync, query, namespace, k, filter_dict,
+    )
 
     # BM25 search — index is built during ingestion (_upsert)
     # If empty (cold start), seed from vector results so BM25 can contribute
     bm25_idx = get_bm25_index(namespace)
     if not bm25_idx.documents and vector_results:
         bm25_idx = get_bm25_index(namespace, vector_results)
-    bm25_results = bm25_idx.search(query, k=k) if bm25_idx.documents else []
+    if bm25_idx.documents:
+        bm25_results = await asyncio.to_thread(bm25_idx.search, query, k)
+    else:
+        bm25_results = []
 
     # Category filter for BM25 results
     if category and bm25_results:

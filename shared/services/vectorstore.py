@@ -1,26 +1,35 @@
-"""Pinecone vector store with per-namespace caching."""
+"""Pinecone vector store with per-namespace caching.
+
+``langchain_pinecone`` / ``pinecone`` are imported lazily: helper functions
+that only need metadata access (list/fetch/delete by ID) avoid pulling
+``PineconeVectorStore`` (which itself pulls langchain_core embeddings shims).
+"""
 
 from functools import lru_cache
 from threading import Lock
-
-from langchain_pinecone import PineconeVectorStore
-from pinecone import Pinecone
+from typing import TYPE_CHECKING
 
 from shared.config import settings
-from shared.services.embedding import get_embedding_model
+
+if TYPE_CHECKING:
+    from langchain_pinecone import PineconeVectorStore
 
 _lock = Lock()
-_stores: dict[str, PineconeVectorStore] = {}
+_stores: dict[str, "PineconeVectorStore"] = {}
 
 
 @lru_cache()
 def _get_pinecone_index():
+    from pinecone import Pinecone
     pc = Pinecone(api_key=settings.PINECONE_API_KEY)
     return pc.Index(settings.PINECONE_INDEX_NAME)
 
 
-def get_vectorstore(namespace: str | None = None) -> PineconeVectorStore:
+def get_vectorstore(namespace: str | None = None) -> "PineconeVectorStore":
     """Get a PineconeVectorStore scoped to the given namespace (thread-safe cache)."""
+    from langchain_pinecone import PineconeVectorStore
+    from shared.services.embedding import get_embedding_model
+
     key = namespace or "__default__"
     if key not in _stores:
         with _lock:
@@ -96,6 +105,34 @@ def get_unique_filenames(namespace: str) -> set[str]:
         return set()
     metadata_list = fetch_metadata_batch(ids, namespace)
     return {m.get("source_filename", "") for m in metadata_list} - {""}
+
+
+def delete_user_vectors(namespace: str, user_id: str) -> int:
+    """Delete every vector in ``namespace`` whose metadata matches ``user_id``.
+
+    Pinecone serverless does not support metadata-filter delete, so we
+    list IDs + fetch metadata + delete by ID in batches. Today no ingestion
+    path tags vectors with user_id, so this is typically a no-op — but it
+    closes the PDPA right-to-erasure gap if user-linked vectors ever appear.
+    """
+    ids = list_all_vector_ids(namespace)
+    if not ids:
+        return 0
+
+    index = get_raw_index()
+    deleted = 0
+    for i in range(0, len(ids), PINECONE_PAGE_SIZE):
+        batch = ids[i:i + PINECONE_PAGE_SIZE]
+        fetched = index.fetch(ids=batch, namespace=namespace)
+        matching: list[str] = []
+        for vid, vec in fetched.vectors.items():
+            meta = vec.metadata or {}
+            if meta.get("user_id") == user_id:
+                matching.append(vid)
+        if matching:
+            index.delete(ids=matching, namespace=namespace)
+            deleted += len(matching)
+    return deleted
 
 
 def get_document_list(namespace: str) -> list[dict]:

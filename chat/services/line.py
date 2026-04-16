@@ -25,7 +25,11 @@ def verify_signature(body: bytes, signature: str, channel_secret: str) -> bool:
 
 
 def parse_text_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract text message events from LINE webhook payload."""
+    """Extract text message events from LINE webhook payload.
+
+    Includes ``webhook_event_id`` and ``timestamp`` so the caller can dedup
+    LINE's automatic retries.
+    """
     events = []
     for event in payload.get("events", []):
         if (
@@ -36,6 +40,8 @@ def parse_text_events(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "reply_token": event["replyToken"],
                 "user_id": event["source"]["userId"],
                 "text": event["message"]["text"],
+                "webhook_event_id": event.get("webhookEventId", ""),
+                "timestamp": event.get("timestamp", 0),
             })
     return events
 

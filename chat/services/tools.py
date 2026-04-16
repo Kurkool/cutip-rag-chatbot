@@ -67,20 +67,23 @@ def create_tools(namespace: str) -> tuple[list, Callable[[], list[dict]]]:
             return f"Calculation error: {e}"
 
     @tool
-    def fetch_webpage(url: str) -> str:
+    async def fetch_webpage(url: str) -> str:
         """Fetch and read a web page as text. Use when search results contain
         a URL or link that might have additional relevant information."""
         import httpx
+        if not url.startswith(("http://", "https://")):
+            return "Only http(s) URLs are supported."
         try:
-            response = httpx.get(
-                f"https://r.jina.ai/{url}",
-                timeout=15,
-                headers={"Accept": "text/plain"},
-            )
-            response.raise_for_status()
-            return response.text[:3000]
-        except Exception as e:
-            return f"Failed to fetch {url}: {e}"
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(
+                    f"https://r.jina.ai/{url}",
+                    headers={"Accept": "text/plain"},
+                )
+                response.raise_for_status()
+                return response.text[:3000]
+        except Exception as exc:
+            logger.info("fetch_webpage failed for %s: %s", url, exc)
+            return "Couldn't fetch that page."
 
     def get_sources() -> list[dict]:
         """Return sources collected during this request's tool calls."""

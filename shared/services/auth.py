@@ -9,6 +9,7 @@ Roles:
 - faculty_admin: access only to assigned tenants
 """
 
+import hmac
 import logging
 from functools import lru_cache
 from typing import Any
@@ -106,9 +107,13 @@ async def get_current_user(
             raise HTTPException(status_code=403, detail="User account is disabled")
         return user
 
-    # 2. Fallback to API key (Cloud Scheduler / programmatic)
-    if api_key and settings.ADMIN_API_KEY and api_key == settings.ADMIN_API_KEY:
-        return _SYSTEM_USER
+    # 2. Fallback to API key (Cloud Scheduler / programmatic).
+    # Constant-time compare + require both sides non-empty to prevent
+    # empty-key bypass and timing attacks.
+    if api_key and settings.ADMIN_API_KEY and hmac.compare_digest(
+        api_key.encode("utf-8"), settings.ADMIN_API_KEY.encode("utf-8"),
+    ):
+        return dict(_SYSTEM_USER)  # return a fresh dict so callers cannot mutate the singleton
 
     raise HTTPException(status_code=401, detail="Not authenticated")
 

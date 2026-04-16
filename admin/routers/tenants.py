@@ -62,7 +62,12 @@ async def delete_tenant(
     tenant_id: str,
     _admin: dict = Depends(require_super_admin),
 ):
-    """Delete a tenant and all its vectors. Super admin only."""
+    """Delete a tenant, its vectors, and all linked per-tenant records.
+
+    Cascade: Pinecone vectors + chat_logs + conversations + consents +
+    admin_user.tenant_ids stripped. Leaving orphaned records would keep
+    PDPA subject data alive after a tenant is removed.
+    """
     tenant = await firestore_service.get_tenant(tenant_id)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
@@ -76,4 +81,5 @@ async def delete_tenant(
             tenant_id,
         )
 
-    await firestore_service.delete_tenant(tenant_id)
+    counts = await firestore_service.delete_tenant_cascade(tenant_id)
+    logger.info("Tenant %s cascade-deleted: %s", tenant_id, counts)
