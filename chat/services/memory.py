@@ -3,6 +3,10 @@
 Persists across Cloud Run instances. Uses Firestore array operations
 to avoid race conditions on concurrent writes. Blocking Firestore + LLM
 calls are wrapped with asyncio.to_thread() to avoid blocking the event loop.
+
+Documents are keyed by (tenant_id, user_id) via composite doc ID
+f"{tenant_id}__{user_id}" to guarantee multi-tenant isolation. A LINE user
+or "anonymous" caller on tenant A cannot read/write tenant B's conversation.
 """
 
 import asyncio
@@ -25,11 +29,16 @@ _SUMMARIZE_PROMPT = (
 )
 
 
+def _doc_key(tenant_id: str, user_id: str) -> str:
+    """Composite Firestore doc ID for (tenant, user) conversation isolation."""
+    return f"{tenant_id}__{user_id}"
+
+
 class ConversationMemory:
     """Sync implementation — all methods block. Use AsyncConversationMemory for FastAPI."""
 
-    def get_history(self, user_id: str) -> list[dict[str, Any]] | dict[str, Any]:
-        doc = self._get_doc(user_id)
+    def get_history(self, tenant_id: str, user_id: str) -> list[dict[str, Any]] | dict[str, Any]:
+        doc = self._get_doc(tenant_id, user_id)
         if not doc:
             return []
 
@@ -37,7 +46,7 @@ class ConversationMemory:
         if last_active:
             elapsed = (datetime.now(timezone.utc) - last_active).total_seconds()
             if elapsed > settings.MEMORY_TTL:
-                self.clear(user_id)
+                self.clear(tenant_id, user_id)
                 return []
 
         turns = doc.get("turns", [])
@@ -48,15 +57,18 @@ class ConversationMemory:
 
         return turns[-settings.MAX_HISTORY_TURNS:]
 
-    def add_turn(self, user_id: str, query: str, answer: str) -> None:
+    def add_turn(self, tenant_id: str, user_id: str, query: str, answer: str) -> None:
         db = get_db()
-        doc_ref = db.collection(CONVERSATIONS_COLLECTION).document(user_id)
+        key = _doc_key(tenant_id, user_id)
+        doc_ref = db.collection(CONVERSATIONS_COLLECTION).document(key)
         turn = {"query": query, "answer": answer}
 
         doc_ref.set(
             {
                 "turns": fs.ArrayUnion([turn]),
                 "last_active": datetime.now(timezone.utc),
+                "tenant_id": tenant_id,
+                "user_id": user_id,
             },
             merge=True,
         )
@@ -70,8 +82,10 @@ class ConversationMemory:
                 new_summary = self._summarize(turns, existing_summary)
                 doc_ref.update({"turns": [], "summary": new_summary})
 
-    def clear(self, user_id: str) -> None:
-        get_db().collection(CONVERSATIONS_COLLECTION).document(user_id).delete()
+    def clear(self, tenant_id: str, user_id: str) -> None:
+        get_db().collection(CONVERSATIONS_COLLECTION).document(
+            _doc_key(tenant_id, user_id)
+        ).delete()
 
     def _summarize(self, turns: list[dict[str, Any]], existing_summary: str = "") -> str:
         """Summarize conversation turns using Haiku. Blocking — call via to_thread."""
@@ -93,8 +107,13 @@ class ConversationMemory:
             logger.warning("Summarization failed, keeping existing summary: %s", exc)
             return existing_summary
 
-    def _get_doc(self, user_id: str) -> dict[str, Any] | None:
-        doc = get_db().collection(CONVERSATIONS_COLLECTION).document(user_id).get()
+    def _get_doc(self, tenant_id: str, user_id: str) -> dict[str, Any] | None:
+        doc = (
+            get_db()
+            .collection(CONVERSATIONS_COLLECTION)
+            .document(_doc_key(tenant_id, user_id))
+            .get()
+        )
         if not doc.exists:
             return None
         return doc.to_dict()
@@ -106,14 +125,18 @@ _memory = ConversationMemory()
 class AsyncConversationMemory:
     """Non-blocking wrapper — runs all blocking calls in thread pool."""
 
-    async def get_history(self, user_id: str) -> list[dict[str, Any]] | dict[str, Any]:
-        return await asyncio.to_thread(_memory.get_history, user_id)
+    async def get_history(
+        self, tenant_id: str, user_id: str,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        return await asyncio.to_thread(_memory.get_history, tenant_id, user_id)
 
-    async def add_turn(self, user_id: str, query: str, answer: str) -> None:
-        await asyncio.to_thread(_memory.add_turn, user_id, query, answer)
+    async def add_turn(
+        self, tenant_id: str, user_id: str, query: str, answer: str,
+    ) -> None:
+        await asyncio.to_thread(_memory.add_turn, tenant_id, user_id, query, answer)
 
-    async def clear(self, user_id: str) -> None:
-        await asyncio.to_thread(_memory.clear, user_id)
+    async def clear(self, tenant_id: str, user_id: str) -> None:
+        await asyncio.to_thread(_memory.clear, tenant_id, user_id)
 
 
 conversation_memory = AsyncConversationMemory()

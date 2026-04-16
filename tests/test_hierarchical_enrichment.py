@@ -163,31 +163,40 @@ async def test_enrich_uses_section_prompt_format():
 
 
 @pytest.mark.asyncio
-async def test_enrich_batches_pause_every_10():
-    """Should pause asyncio.sleep every 10 chunks, not every 5."""
-    sleep_calls = []
+async def test_enrich_respects_concurrency_limit():
+    """Enrichment must never exceed _ENRICHMENT_CONCURRENCY in-flight calls.
 
-    async def fake_sleep(secs):
-        sleep_calls.append(secs)
+    The old implementation paused sleep(1) every 10 chunks — bursty and
+    unbounded. The new implementation uses asyncio.Semaphore so the number
+    of concurrent Anthropic calls is capped, avoiding 429s.
+    """
+    import asyncio
+    in_flight = 0
+    peak = 0
+
+    async def fake_invoke(_prompt):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0)  # yield so other coroutines can run
+            return MagicMock(content="ctx")
+        finally:
+            in_flight -= 1
 
     with patch("ingest.services.enrichment.get_haiku_precise") as MockLLM:
         mock_instance = MagicMock()
-        mock_instance.ainvoke = AsyncMock(return_value=MagicMock(content="ctx"))
-        MockLLM.return_value = mock_instance  # get_haiku_precise() returns the mock
+        mock_instance.ainvoke = AsyncMock(side_effect=fake_invoke)
+        MockLLM.return_value = mock_instance
 
-        with patch("ingest.services.ingestion.asyncio.sleep", side_effect=fake_sleep):
-            from ingest.services.enrichment import _enrich_with_context
-            import importlib
-            import ingest.services.ingestion as ing_mod
-            importlib.reload(ing_mod)
+        from ingest.services.enrichment import _ENRICHMENT_CONCURRENCY, _enrich_with_context
 
-            full_text = "# Section\n\n" + "Content here. " * 20
-            chunks = [
-                Document(page_content=f"Content chunk {i}", metadata={})
-                for i in range(12)
-            ]
-            # Re-import after reload
-            await ing_mod._enrich_with_context(chunks, full_text)
+        full_text = "# Section\n\n" + "Content here. " * 20
+        chunks = [
+            Document(page_content=f"Content chunk {i}", metadata={})
+            for i in range(20)
+        ]
+        await _enrich_with_context(chunks, full_text)
 
-    # Should have paused once (at index 10), not at index 5
-    assert len(sleep_calls) == 1
+    assert peak <= _ENRICHMENT_CONCURRENCY
+    assert peak >= 1  # sanity: enrichment actually ran

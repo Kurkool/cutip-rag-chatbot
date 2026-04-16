@@ -2,12 +2,16 @@
 
 import json
 import logging
+import time
+from collections import OrderedDict
+from threading import Lock
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from shared.schemas import ChatRequest, ChatResponse
 from shared.services import firestore as firestore_service
+from shared.services.auth import check_tenant_access, get_current_user
 from chat.services.agent import run_agent
 from shared.services.dependencies import get_tenant_or_404
 from chat.services.line import parse_text_events, reply_flex_message, reply_message, verify_signature
@@ -17,7 +21,43 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["LINE Webhook"])
 
-DEFAULT_USER_ID = "anonymous"
+_ANON_PREFIX = "anon"
+
+# Webhook rate limit ceiling: high enough not to throttle normal LINE edge
+# traffic (shared IPs across customers), low enough to stop a burst DoS.
+_WEBHOOK_RATE_LIMIT = "600/minute"
+
+# In-memory TTL dedup for webhookEventId. LINE retries failed deliveries, so
+# without dedup a single user message can summarize twice, double-log, and
+# double-charge usage. 5 minutes covers the retry window.
+_DEDUP_TTL_SECONDS = 300
+_dedup_lock = Lock()
+_dedup_cache: "OrderedDict[str, float]" = OrderedDict()
+
+
+def _default_user_id(tenant_id: str) -> str:
+    """Namespace anonymous callers per-tenant so /api/chat without user_id
+    cannot accidentally share conversation memory across tenants.
+    """
+    return f"{_ANON_PREFIX}_{tenant_id}"
+
+
+def _is_duplicate_event(event_id: str) -> bool:
+    """Return True if this webhookEventId was seen within the TTL window."""
+    if not event_id:
+        return False
+    now = time.time()
+    with _dedup_lock:
+        # Evict expired entries (bounded-time because OrderedDict is ordered by insertion)
+        while _dedup_cache:
+            oldest_key, oldest_ts = next(iter(_dedup_cache.items()))
+            if now - oldest_ts < _DEDUP_TTL_SECONDS:
+                break
+            _dedup_cache.popitem(last=False)
+        if event_id in _dedup_cache:
+            return True
+        _dedup_cache[event_id] = now
+    return False
 ERROR_REPLY_THAI = "ขออภัยค่ะ เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง"
 
 
@@ -26,6 +66,7 @@ ERROR_REPLY_THAI = "ขออภัยค่ะ เกิดข้อผิด�
 # ──────────────────────────────────────
 
 @router.post("/webhook/line")
+@limiter.limit(_WEBHOOK_RATE_LIMIT)
 async def line_webhook(request: Request):
     """Receive LINE events, identify tenant, run agentic RAG, reply."""
     body = await request.body()
@@ -39,6 +80,12 @@ async def line_webhook(request: Request):
     _verify_request(body, signature, tenant)
 
     for event in parse_text_events(payload):
+        if _is_duplicate_event(event.get("webhook_event_id", "")):
+            logger.info(
+                "[%s] dropping duplicate webhookEventId=%s",
+                tenant["tenant_id"], event.get("webhook_event_id"),
+            )
+            continue
         await _handle_message_event(event, tenant)
 
     return {"status": "ok"}
@@ -46,13 +93,24 @@ async def line_webhook(request: Request):
 
 @router.post("/api/chat", response_model=ChatResponse, tags=["Chat"])
 @limiter.limit(chat_limit)
-async def chat(request: Request, body: ChatRequest):
-    """Standalone chat endpoint for testing or n8n integration."""
+async def chat(
+    request: Request,
+    body: ChatRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Standalone chat endpoint for testing or n8n integration.
+
+    Requires Firebase bearer token or admin API key. tenant_id in the body
+    must be one the caller is authorized for (super_admin / API-key: any;
+    faculty_admin: only their assigned tenants).
+    """
     if not body.tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id is required")
 
+    check_tenant_access(current_user, body.tenant_id)
+
     tenant = await get_tenant_or_404(body.tenant_id)
-    user_id = body.user_id or DEFAULT_USER_ID
+    user_id = body.user_id or _default_user_id(body.tenant_id)
 
     answer, sources = await run_agent(query=body.query, user_id=user_id, tenant=tenant)
 

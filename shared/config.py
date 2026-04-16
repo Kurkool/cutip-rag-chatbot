@@ -44,6 +44,20 @@ class Settings(BaseSettings):
             raise ValueError("API key must not be empty")
         return v
 
+    @field_validator("ADMIN_API_KEY")
+    @classmethod
+    def validate_admin_api_key(cls, v: str) -> str:
+        """Either unset (dev/local) or at least 32 chars (prod).
+
+        An 8-char key can be brute-forced; leaving it empty is explicit intent
+        to disable the API-key auth path. We reject anything in between so a
+        weak production secret can never sneak past code review.
+        """
+        v = v.strip()
+        if v and len(v) < 32:
+            raise ValueError("ADMIN_API_KEY must be at least 32 characters (or empty)")
+        return v
+
     # Models
     LLM_MODEL: str = "claude-opus-4-6"
     EMBEDDING_MODEL: str = "embed-v4.0"
@@ -93,6 +107,9 @@ class Settings(BaseSettings):
 
     # Reciprocal Rank Fusion
     RRF_K: int = 60
+
+    # Agent loop
+    AGENT_RECURSION_LIMIT: int = 8  # max LangGraph ReAct steps per request
 
     model_config = {"env_file": ".env"}
 

@@ -98,6 +98,39 @@ def _find_section_for_chunk(sections: list[dict], chunk_text: str, full_text: st
     return result
 
 
+_ENRICHMENT_CONCURRENCY = 5
+_ENRICHMENT_MAX_RETRIES = 3
+
+
+async def _enrich_one(
+    chunk: Document,
+    prompt: str,
+    llm,
+    semaphore: asyncio.Semaphore,
+) -> None:
+    """Enrich a single chunk with retry/backoff on transient errors."""
+    async with semaphore:
+        delay = 1.0
+        for attempt in range(_ENRICHMENT_MAX_RETRIES):
+            try:
+                context = await llm.ainvoke(prompt)
+                chunk.page_content = f"[{context.content.strip()}]\n{chunk.page_content}"
+                return
+            except Exception as exc:
+                is_last = attempt == _ENRICHMENT_MAX_RETRIES - 1
+                msg = str(exc).lower()
+                is_rate = "429" in msg or "rate" in msg or "overloaded" in msg
+                if is_last or not is_rate:
+                    if is_last:
+                        logger.warning(
+                            "Failed to enrich chunk after %d attempts: %s",
+                            _ENRICHMENT_MAX_RETRIES, exc,
+                        )
+                    return
+                await asyncio.sleep(delay)
+                delay *= 2  # exponential backoff: 1s, 2s, 4s
+
+
 async def _enrich_with_context(
     chunks: list[Document], full_text: str
 ) -> list[Document]:
@@ -106,6 +139,10 @@ async def _enrich_with_context(
     When the document has markdown headers, each chunk is enriched with
     context from its owning section. Otherwise, a global document context
     is used (first 4000 chars).
+
+    Uses a bounded-concurrency semaphore (instead of the old naive
+    sleep-every-10-chunks heuristic) so throughput is even and we never
+    burst past Anthropic's TPM ceiling.
     """
     if not chunks:
         return chunks
@@ -114,27 +151,24 @@ async def _enrich_with_context(
     use_sections = len(sections) > 1 or sections[0]["title"] != "Document"
 
     llm = get_haiku_precise()
+    semaphore = asyncio.Semaphore(_ENRICHMENT_CONCURRENCY)
 
-    for i, chunk in enumerate(chunks):
-        if i > 0 and i % 10 == 0:
-            await asyncio.sleep(1)  # Rate limit: pause every 10 chunks
-        try:
-            if use_sections:
-                section = _find_section_for_chunk(sections, chunk.page_content, full_text)
-                prompt = _SECTION_CONTEXT_PROMPT.format(
-                    section_title=section["title"],
-                    section_text=section["text"],
-                    chunk=chunk.page_content,
-                )
-            else:
-                doc_summary = full_text[:4000]
-                prompt = _GLOBAL_CONTEXT_PROMPT.format(
-                    document=doc_summary,
-                    chunk=chunk.page_content,
-                )
-            context = await llm.ainvoke(prompt)
-            chunk.page_content = f"[{context.content.strip()}]\n{chunk.page_content}"
-        except Exception:
-            logger.warning("Failed to generate context for chunk, skipping")
+    tasks = []
+    for chunk in chunks:
+        if use_sections:
+            section = _find_section_for_chunk(sections, chunk.page_content, full_text)
+            prompt = _SECTION_CONTEXT_PROMPT.format(
+                section_title=section["title"],
+                section_text=section["text"],
+                chunk=chunk.page_content,
+            )
+        else:
+            doc_summary = full_text[:4000]
+            prompt = _GLOBAL_CONTEXT_PROMPT.format(
+                document=doc_summary,
+                chunk=chunk.page_content,
+            )
+        tasks.append(_enrich_one(chunk, prompt, llm, semaphore))
 
+    await asyncio.gather(*tasks)
     return chunks

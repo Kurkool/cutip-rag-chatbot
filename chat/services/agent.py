@@ -8,6 +8,7 @@ from anthropic import (
     RateLimitError,
 )
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import create_react_agent
 
 from shared.config import settings
@@ -69,8 +70,9 @@ async def run_agent(
     Catches API errors (rate limit, auth, quota) and returns user-friendly messages.
     """
     namespace = tenant["pinecone_namespace"]
+    tenant_id = tenant["tenant_id"]
     persona = tenant.get("persona", "") or "You are a helpful university assistant."
-    history = await conversation_memory.get_history(user_id)
+    history = await conversation_memory.get_history(tenant_id, user_id)
 
     tools, get_sources = create_tools(namespace)
     agent = create_react_agent(model=_get_llm(), tools=tools)
@@ -83,12 +85,15 @@ async def run_agent(
     sources: list[dict] = []
 
     try:
-        result = await agent.ainvoke({
-            "messages": [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=query),
-            ]
-        })
+        result = await agent.ainvoke(
+            {
+                "messages": [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=query),
+                ]
+            },
+            config={"recursion_limit": settings.AGENT_RECURSION_LIMIT},
+        )
         answer = result["messages"][-1].content
         sources = get_sources()
 
@@ -103,6 +108,14 @@ async def run_agent(
         if search_count:
             await track_usage(tid, "embedding_call", search_count)
             await track_usage(tid, "reranker_call", search_count)
+
+    except GraphRecursionError:
+        logger.warning(
+            "Agent hit recursion_limit=%d for tenant %s",
+            settings.AGENT_RECURSION_LIMIT, tenant["tenant_id"],
+        )
+        answer = "ขออภัยค่ะ ค้นหาข้อมูลหลายรอบแล้วแต่ยังไม่พบคำตอบที่แน่ชัด กรุณาติดต่อเจ้าหน้าที่คณะ"
+        sources = []
 
     except AuthenticationError:
         logger.error("Anthropic API key invalid or expired")
@@ -128,5 +141,5 @@ async def run_agent(
         answer = "ขออภัยค่ะ เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง"
         sources = []
 
-    await conversation_memory.add_turn(user_id, query, answer)
+    await conversation_memory.add_turn(tenant_id, user_id, query, answer)
     return answer, sources

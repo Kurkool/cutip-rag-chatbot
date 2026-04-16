@@ -90,6 +90,64 @@ def _delete_tenant_sync(tenant_id: str) -> bool:
     return True
 
 
+def _delete_tenant_cascade_sync(tenant_id: str) -> dict[str, int]:
+    """Delete a tenant plus all linked per-tenant records.
+
+    Cascades: chat_logs, conversations, consents, pending_registrations for
+    this tenant, and strips the tenant_id from any admin_user's tenant_ids.
+    Returns per-collection delete counts for observability.
+    """
+    db = _get_db()
+
+    counts = {
+        "chat_logs": 0,
+        "conversations": 0,
+        "consents": 0,
+        "registrations": 0,
+        "admin_users_updated": 0,
+    }
+
+    for doc in (
+        db.collection(CHAT_LOGS_COLLECTION)
+        .where(filter=FieldFilter("tenant_id", "==", tenant_id))
+        .get()
+    ):
+        doc.reference.delete()
+        counts["chat_logs"] += 1
+
+    for doc in (
+        db.collection(CONVERSATIONS_COLLECTION)
+        .where(filter=FieldFilter("tenant_id", "==", tenant_id))
+        .get()
+    ):
+        doc.reference.delete()
+        counts["conversations"] += 1
+
+    for doc in (
+        db.collection(CONSENTS_COLLECTION)
+        .where(filter=FieldFilter("tenant_id", "==", tenant_id))
+        .get()
+    ):
+        doc.reference.delete()
+        counts["consents"] += 1
+
+    for doc in db.collection(ADMIN_USERS_COLLECTION).get():
+        data = doc.to_dict() or {}
+        tenant_ids = data.get("tenant_ids") or []
+        if tenant_id in tenant_ids:
+            doc.reference.update({
+                "tenant_ids": [t for t in tenant_ids if t != tenant_id],
+                "updated_at": datetime.now(timezone.utc),
+            })
+            counts["admin_users_updated"] += 1
+
+    tenant_ref = db.collection(TENANTS_COLLECTION).document(tenant_id)
+    if tenant_ref.get().exists:
+        tenant_ref.delete()
+
+    return counts
+
+
 def _log_chat_sync(
     tenant_id: str, user_id: str, query: str, answer: str,
     sources: list[dict[str, Any]],
@@ -154,7 +212,8 @@ def _export_user_data_sync(tenant_id: str, user_id: str) -> dict[str, Any]:
     )
     chat_logs = [{"id": doc.id, **doc.to_dict()} for doc in logs]
 
-    conv_doc = db.collection(CONVERSATIONS_COLLECTION).document(user_id).get()
+    conv_key = f"{tenant_id}__{user_id}"
+    conv_doc = db.collection(CONVERSATIONS_COLLECTION).document(conv_key).get()
     conversation = conv_doc.to_dict() if conv_doc.exists else None
 
     consent_docs = (
@@ -189,7 +248,8 @@ def _delete_user_data_sync(tenant_id: str, user_id: str) -> dict[str, Any]:
         deleted_logs += 1
 
     deleted_conv = 0
-    conv_ref = db.collection(CONVERSATIONS_COLLECTION).document(user_id)
+    conv_key = f"{tenant_id}__{user_id}"
+    conv_ref = db.collection(CONVERSATIONS_COLLECTION).document(conv_key)
     if conv_ref.get().exists:
         conv_ref.delete()
         deleted_conv = 1
@@ -206,10 +266,30 @@ def _delete_user_data_sync(tenant_id: str, user_id: str) -> dict[str, Any]:
         doc.reference.delete()
         deleted_consents += 1
 
+    # Delete any Pinecone vectors tagged with this user_id. Today the ingest
+    # pipeline does not tag chunks with user_id (documents are tenant-scoped),
+    # so this is typically a no-op — but closes the PDPA gap if user-linked
+    # content is ever indexed.
+    deleted_vectors = 0
+    tenant_doc = db.collection(TENANTS_COLLECTION).document(tenant_id).get()
+    if tenant_doc.exists:
+        namespace = tenant_doc.to_dict().get("pinecone_namespace")
+        if namespace:
+            try:
+                from shared.services.vectorstore import delete_user_vectors
+                deleted_vectors = delete_user_vectors(namespace, user_id)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Pinecone user-vector delete failed for %s/%s",
+                    tenant_id, user_id,
+                )
+
     return {
         "deleted_chat_logs": deleted_logs,
         "deleted_conversations": deleted_conv,
         "deleted_consents": deleted_consents,
+        "deleted_vectors": deleted_vectors,
     }
 
 
@@ -229,12 +309,15 @@ def _anonymize_user_data_sync(tenant_id: str, user_id: str) -> dict[str, Any]:
         doc.reference.update({"user_id": anon_id})
         count += 1
 
-    conv_ref = db.collection(CONVERSATIONS_COLLECTION).document(user_id)
+    conv_key = f"{tenant_id}__{user_id}"
+    conv_ref = db.collection(CONVERSATIONS_COLLECTION).document(conv_key)
     conv_snap = conv_ref.get()
     if conv_snap.exists:
         data = conv_snap.to_dict()
+        data["user_id"] = anon_id
         conv_ref.delete()
-        db.collection(CONVERSATIONS_COLLECTION).document(anon_id).set(data)
+        anon_key = f"{tenant_id}__{anon_id}"
+        db.collection(CONVERSATIONS_COLLECTION).document(anon_key).set(data)
 
     # Anonymize consent records
     consent_docs = (
@@ -379,6 +462,7 @@ get_tenant_by_destination = _async_wrap(_get_tenant_by_destination_sync)
 list_tenants = _async_wrap(_list_tenants_sync)
 update_tenant = _async_wrap(_update_tenant_sync)
 delete_tenant = _async_wrap(_delete_tenant_sync)
+delete_tenant_cascade = _async_wrap(_delete_tenant_cascade_sync)
 
 # Chat Logs & Analytics
 log_chat = _async_wrap(_log_chat_sync)

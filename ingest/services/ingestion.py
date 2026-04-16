@@ -16,7 +16,13 @@ from langchain_core.documents import Document
 
 from shared.config import settings
 from shared.services import usage
-from shared.services.vectorstore import get_raw_index, get_vectorstore
+from shared.services.vectorstore import (
+    PINECONE_PAGE_SIZE,
+    fetch_metadata_batch,
+    get_raw_index,
+    get_vectorstore,
+    list_all_vector_ids,
+)
 from ingest.services.chunking import _smart_chunk, _chunk_pages
 from ingest.services.enrichment import _enrich_with_context
 from ingest.services.vision import interpret_spreadsheet, parse_page_image
@@ -110,18 +116,37 @@ async def ingest_legacy(
 # Duplicate Detection: delete old vectors before re-ingest
 # ──────────────────────────────────────
 
-def _delete_existing_vectors(namespace: str, source_filename: str):
-    """Delete all vectors with matching source_filename in the namespace."""
-    try:
-        index = get_raw_index()
-        # Pinecone: delete by metadata filter
-        index.delete(
-            filter={"source_filename": source_filename},
-            namespace=namespace,
+def _delete_existing_vectors(namespace: str, source_filename: str) -> int:
+    """Delete all vectors with matching source_filename in the namespace.
+
+    Pinecone serverless does not support metadata-filter delete, so we list
+    IDs + fetch metadata + delete by ID in batches. Returns the number of
+    vectors actually deleted so the caller can assert dedup worked.
+    """
+    ids = list_all_vector_ids(namespace)
+    if not ids:
+        return 0
+
+    index = get_raw_index()
+    deleted = 0
+    for i in range(0, len(ids), PINECONE_PAGE_SIZE):
+        batch = ids[i:i + PINECONE_PAGE_SIZE]
+        fetched = index.fetch(ids=batch, namespace=namespace)
+        matching: list[str] = []
+        for vid, vec in fetched.vectors.items():
+            meta = vec.metadata or {}
+            if meta.get("source_filename") == source_filename:
+                matching.append(vid)
+        if matching:
+            index.delete(ids=matching, namespace=namespace)
+            deleted += len(matching)
+
+    if deleted:
+        logger.info(
+            "Dedup: deleted %d old vectors for '%s' in namespace '%s'",
+            deleted, source_filename, namespace,
         )
-        logger.info("Deleted old vectors for '%s' in namespace '%s'", source_filename, namespace)
-    except Exception:
-        logger.warning("Could not delete old vectors for '%s' (may not exist)", source_filename)
+    return deleted
 
 
 # ──────────────────────────────────────
@@ -491,7 +516,10 @@ async def _upsert(
         chunk.metadata.update(extra_metadata)
         urls = _URL_PATTERN.findall(chunk.page_content)
         if urls:
-            chunk.metadata["urls"] = urls
+            # Pinecone caps metadata at 40KB per vector. A page with many
+            # footnote URLs can exceed that and cause a silent upsert failure.
+            # Cap at 20 URLs (well below the limit for typical URL lengths).
+            chunk.metadata["urls"] = urls[:20]
 
     vectorstore = get_vectorstore(namespace)
     await vectorstore.aadd_documents(chunks)
