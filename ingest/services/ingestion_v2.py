@@ -7,13 +7,32 @@ See docs/superpowers/specs/2026-04-18-ingest-v2-design.md for design.
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from typing import Any
 
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from ingest.services._v2_prompts import (
+    CHUNK_TOOL_SCHEMA,
+    SYSTEM_PROMPT,
+    USER_PROMPT_TEMPLATE,
+    format_sidecar,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _get_opus_llm():
+    """Return the Opus 4.7 Vision LLM used for v2 parsing.
+
+    Reuses the existing OCR LLM factory. Kept as a private function so
+    tests can monkeypatch it without touching the shared services layer.
+    """
+    from shared.services.llm import get_ocr_llm
+    return get_ocr_llm()
 
 
 def ensure_pdf(file_bytes: bytes, filename: str) -> bytes:
@@ -81,8 +100,71 @@ async def opus_parse_and_chunk(
     hyperlinks: list[dict],
     filename: str,
 ) -> list[Document]:
-    """Opus 4.7 reads PDF + sidecar, returns chunks. Placeholder."""
-    raise NotImplementedError
+    """Send PDF + sidecar to Opus 4.7 with forced tool use, return chunks.
+
+    Opus receives:
+    - System prompt defining chunking rules and tool-call contract
+    - User message: PDF as ``document`` content block + text describing
+      filename and hyperlink sidecar
+    - Forced ``tool_choice="record_chunks"`` so the response always comes
+      back as structured JSON via tool arguments rather than free-form text
+
+    Returns a list of LangChain ``Document`` objects with metadata
+    ``{page, section_path, has_table}``. Higher-level ``_upsert`` layers
+    on ``source_filename``, ``tenant_id``, ``ingest_ts`` etc.
+
+    Empty / refusal / malformed responses return ``[]`` — the caller
+    treats that as "no ingestable content".
+    """
+    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+    sidecar_block = format_sidecar(hyperlinks)
+    user_text = USER_PROMPT_TEMPLATE.format(
+        filename=filename,
+        sidecar_block=sidecar_block,
+    )
+
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=[
+            {
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": pdf_b64,
+                },
+            },
+            {"type": "text", "text": user_text},
+        ]),
+    ]
+
+    llm = _get_opus_llm().bind_tools(
+        [CHUNK_TOOL_SCHEMA],
+        tool_choice={"type": "tool", "name": CHUNK_TOOL_SCHEMA["name"]},
+    )
+    response = await llm.ainvoke(messages)
+
+    tool_calls = getattr(response, "tool_calls", None) or []
+    if not tool_calls:
+        logger.warning(
+            "opus_parse_and_chunk(%s): no tool_call in response — returning []",
+            filename,
+        )
+        return []
+
+    raw_chunks = tool_calls[0].get("args", {}).get("chunks", [])
+    return [
+        Document(
+            page_content=c["text"],
+            metadata={
+                "page": int(c.get("page", 1)),
+                "section_path": c.get("section_path", ""),
+                "has_table": bool(c.get("has_table", False)),
+            },
+        )
+        for c in raw_chunks
+        if c.get("text", "").strip()
+    ]
 
 
 async def ingest_v2(

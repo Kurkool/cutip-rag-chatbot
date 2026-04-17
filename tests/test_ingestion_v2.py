@@ -112,3 +112,46 @@ def test_extract_hyperlinks_skips_uris_already_visible_in_text():
     # Only the hidden one should be in the sidecar.
     assert len(links) == 1
     assert links[0]["uri"] == "https://example.org/hidden"
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_happy_path(monkeypatch):
+    """Mocked Opus returns a valid tool call → list of Document chunks."""
+    from langchain_core.messages import AIMessage
+
+    async def fake_ainvoke(messages):
+        return AIMessage(
+            content="",
+            tool_calls=[{
+                "name": "record_chunks",
+                "args": {
+                    "chunks": [
+                        {"text": "chunk one body", "section_path": "Intro", "page": 1, "has_table": False},
+                        {"text": "chunk two body", "section_path": "", "page": 2, "has_table": True},
+                    ],
+                },
+                "id": "call_1",
+            }],
+        )
+
+    class FakeLLM:
+        def bind_tools(self, tools, tool_choice=None):
+            return self
+
+        async def ainvoke(self, messages):
+            return await fake_ainvoke(messages)
+
+    # Patch the LLM factory used by v2.
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: FakeLLM())
+
+    pdf_bytes = b"%PDF-1.4\nminimal\n%%EOF"
+    hyperlinks = [{"page": 1, "text": "ref", "uri": "https://example.org"}]
+
+    chunks = await ingestion_v2.opus_parse_and_chunk(pdf_bytes, hyperlinks, "test.pdf")
+
+    assert len(chunks) == 2
+    assert chunks[0].page_content == "chunk one body"
+    assert chunks[0].metadata["section_path"] == "Intro"
+    assert chunks[0].metadata["page"] == 1
+    assert chunks[0].metadata["has_table"] is False
+    assert chunks[1].metadata["has_table"] is True
