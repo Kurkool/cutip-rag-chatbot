@@ -184,3 +184,23 @@ async def test_opus_parse_and_chunk_filters_refusal_chunks(monkeypatch):
 
     assert len(chunks) == 1
     assert "real substantive content" in chunks[0].page_content
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_returns_empty_when_no_tool_call(monkeypatch):
+    """If Opus replies without calling the tool, we return [] and do not crash."""
+    from langchain_core.messages import AIMessage
+
+    class FakeLLM:
+        def bind_tools(self, tools, tool_choice=None):
+            return self
+
+        async def ainvoke(self, messages):
+            # Note: no tool_calls attribute populated (model did not call the tool)
+            return AIMessage(content="I have nothing to say.")
+
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: FakeLLM())
+
+    chunks = await ingestion_v2.opus_parse_and_chunk(b"%PDF-1.4\n%%EOF", [], "t.pdf")
+
+    assert chunks == []
