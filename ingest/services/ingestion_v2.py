@@ -8,6 +8,7 @@ See docs/superpowers/specs/2026-04-18-ingest-v2-design.md for design.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from langchain_core.documents import Document
@@ -16,8 +17,19 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_pdf(file_bytes: bytes, filename: str) -> bytes:
-    """Normalize any supported input to PDF bytes. Placeholder."""
-    raise NotImplementedError
+    """Normalize any supported input to PDF bytes.
+
+    PDF inputs are passed through untouched (byte-identity preserved).
+    DOCX/XLSX/PPT and their legacy variants are converted via LibreOffice
+    (delegated to v1's battle-tested `_convert_to_pdf`).
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    if ext == ".pdf":
+        return file_bytes
+    if ext in {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}:
+        from ingest.services.ingestion import _convert_to_pdf
+        return _convert_to_pdf(file_bytes, ext)
+    raise ValueError(f"ensure_pdf: unsupported extension '{ext}' for '{filename}'")
 
 
 def extract_hyperlinks(pdf_bytes: bytes) -> list[dict]:
