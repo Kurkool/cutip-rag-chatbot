@@ -181,10 +181,44 @@ async def ingest_v2(
     filename: str,
     namespace: str,
     tenant_id: str,
-    skip_enrichment: bool = False,
+    skip_enrichment: bool = True,  # v2 default: Opus already enriched
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
 ) -> int:
-    """Main v2 entrypoint. Placeholder."""
-    raise NotImplementedError
+    """v2 universal ingestion entrypoint.
+
+    Pipeline:
+      1. ``ensure_pdf`` — normalize any supported format to PDF bytes
+      2. ``extract_hyperlinks`` — deterministic sidecar for hidden URIs
+      3. ``opus_parse_and_chunk`` — one Opus 4.7 call returns chunks with
+         section context already inlined (no separate enrichment pass)
+      4. ``_upsert`` (reused from v1) — Cohere embed, Pinecone atomic swap,
+         BM25 cross-process invalidation
+
+    ``skip_enrichment`` defaults to True: v2 does not want v1's
+    ``_enrich_with_context`` second pass — Opus already annotates.
+    """
+    from ingest.services.ingestion import _build_metadata, _upsert
+
+    pdf_bytes = ensure_pdf(file_bytes, filename)
+    hyperlinks = extract_hyperlinks(pdf_bytes)
+    chunks = await opus_parse_and_chunk(pdf_bytes, hyperlinks, filename)
+
+    if not chunks:
+        logger.warning("ingest_v2(%s): Opus returned 0 chunks — nothing upserted", filename)
+        return 0
+
+    metadata = _build_metadata(
+        tenant_id=tenant_id,
+        source_type="pdf",  # v2 universalizes to pdf
+        source_filename=filename,
+        doc_category=doc_category,
+        url=url,
+        download_link=download_link,
+    )
+    return await _upsert(
+        chunks, namespace, metadata,
+        full_text="",              # v2 never needs v1-style re-enrichment
+        skip_enrichment=True,      # explicit, not just relying on default
+    )

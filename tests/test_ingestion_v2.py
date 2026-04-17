@@ -204,3 +204,62 @@ async def test_opus_parse_and_chunk_returns_empty_when_no_tool_call(monkeypatch)
     chunks = await ingestion_v2.opus_parse_and_chunk(b"%PDF-1.4\n%%EOF", [], "t.pdf")
 
     assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
+    """End-to-end: ensure_pdf → extract_hyperlinks → opus → _upsert."""
+    from langchain_core.documents import Document
+
+    calls = {}
+
+    def fake_ensure_pdf(blob, fn):
+        calls["ensure_pdf"] = (blob, fn)
+        return b"%PDF-1.4\nnormalized\n%%EOF"
+
+    def fake_extract_hyperlinks(pdf):
+        calls["extract_hyperlinks"] = pdf
+        return [{"page": 1, "text": "t", "uri": "https://x"}]
+
+    async def fake_opus(pdf, links, fn):
+        calls["opus"] = (pdf, links, fn)
+        return [Document(page_content="body", metadata={"page": 1, "section_path": "", "has_table": False})]
+
+    async def fake_upsert(chunks, namespace, extra_metadata, full_text="", skip_enrichment=False):
+        calls["upsert"] = {
+            "chunks_len": len(chunks),
+            "namespace": namespace,
+            "extra_metadata": extra_metadata,
+            "skip_enrichment": skip_enrichment,
+        }
+        return len(chunks)
+
+    monkeypatch.setattr(ingestion_v2, "ensure_pdf", fake_ensure_pdf)
+    monkeypatch.setattr(ingestion_v2, "extract_hyperlinks", fake_extract_hyperlinks)
+    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
+
+    import ingest.services.ingestion as v1_mod
+    monkeypatch.setattr(v1_mod, "_upsert", fake_upsert)
+
+    result = await ingestion_v2.ingest_v2(
+        file_bytes=b"DOCX-bytes",
+        filename="form.docx",
+        namespace="cutip_v2_audit",
+        tenant_id="cutip_01",
+        doc_category="form",
+        download_link="https://drive.google.com/file/d/xyz/view",
+    )
+
+    assert result == 1
+    assert calls["ensure_pdf"] == (b"DOCX-bytes", "form.docx")
+    assert calls["extract_hyperlinks"] == b"%PDF-1.4\nnormalized\n%%EOF"
+    assert calls["opus"][2] == "form.docx"
+    assert calls["upsert"]["namespace"] == "cutip_v2_audit"
+    # v2 MUST always skip v1's _enrich_with_context — Opus already annotated.
+    assert calls["upsert"]["skip_enrichment"] is True
+    meta = calls["upsert"]["extra_metadata"]
+    assert meta["tenant_id"] == "cutip_01"
+    assert meta["source_filename"] == "form.docx"
+    assert meta["doc_category"] == "form"
+    assert meta["source_type"] == "pdf"  # everything normalizes to pdf in v2
+    assert meta["download_link"] == "https://drive.google.com/file/d/xyz/view"
