@@ -40,3 +40,36 @@ def test_ensure_pdf_invokes_libreoffice_for_docx(monkeypatch):
 def test_ensure_pdf_rejects_unsupported_extension():
     with pytest.raises(ValueError, match="unsupported extension"):
         ingestion_v2.ensure_pdf(b"junk", "image.jpg")
+
+
+def test_extract_hyperlinks_returns_per_page_uris():
+    """Synthetic PDF with one hyperlink annotation → one sidecar entry."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Click here for details")
+    rect = pymupdf.Rect(72, 70, 200, 90)
+    page.insert_link({"kind": pymupdf.LINK_URI, "from": rect, "uri": "https://example.org/details"})
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    links = ingestion_v2.extract_hyperlinks(pdf_bytes)
+
+    assert len(links) == 1
+    assert links[0]["page"] == 1
+    assert links[0]["uri"] == "https://example.org/details"
+    assert "Click here" in links[0]["text"]
+
+
+def test_extract_hyperlinks_empty_pdf_returns_empty_list():
+    import pymupdf
+
+    doc = pymupdf.open()
+    doc.new_page()
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    links = ingestion_v2.extract_hyperlinks(pdf_bytes)
+
+    assert links == []

@@ -33,8 +33,37 @@ def ensure_pdf(file_bytes: bytes, filename: str) -> bytes:
 
 
 def extract_hyperlinks(pdf_bytes: bytes) -> list[dict]:
-    """Extract hidden hyperlink URIs per page. Placeholder."""
-    raise NotImplementedError
+    """Extract hidden hyperlink URIs from every page as sidecar metadata.
+
+    Returns a list of ``{"page": int, "text": str, "uri": str}`` entries.
+    ``text`` is the visible anchor text (from the PDF text layer clipped
+    to the link rectangle); ``uri`` is the target URL. Page numbering is
+    1-based to match how users refer to pages.
+
+    Opus 4.7 reading a PDF cannot see link annotations — only the rendered
+    visual. We inject this sidecar so generated chunks can still emit
+    inline ``[anchor](uri)`` markdown links when relevant.
+    """
+    import pymupdf
+
+    links: list[dict] = []
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page_index, page in enumerate(doc):
+            for link in page.get_links():
+                uri = link.get("uri", "")
+                if not uri:
+                    continue
+                rect = link.get("from", pymupdf.Rect())
+                anchor_text = page.get_text("text", clip=rect).strip() or uri
+                links.append({
+                    "page": page_index + 1,
+                    "text": anchor_text,
+                    "uri": uri,
+                })
+    finally:
+        doc.close()
+    return links
 
 
 async def opus_parse_and_chunk(
