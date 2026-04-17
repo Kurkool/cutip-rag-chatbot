@@ -11,6 +11,7 @@ Categories:
   - Out-of-domain (must refuse honestly)
   - Follow-up queries (conversation memory)
 """
+import argparse
 import subprocess
 import sys
 import time
@@ -23,6 +24,11 @@ key = subprocess.check_output(
     ["gcloud", "secrets", "versions", "access", "latest", "--secret=ADMIN_API_KEY"],
     shell=True,
 ).decode().strip()
+
+parser = argparse.ArgumentParser(description="20-query adversarial bot probe")
+parser.add_argument("--namespace", default="cutip_01")
+args = parser.parse_args()
+TENANT_ID = args.namespace
 
 # Each probe: (label, query, must_contain_any_of, must_not_contain, category)
 PROBES = [
@@ -160,7 +166,7 @@ with httpx.Client(timeout=120) as client:
         r = client.post(
             CHAT_URL,
             headers={"X-API-Key": key, "Content-Type": "application/json"},
-            json={"query": q, "tenant_id": "cutip_01", "user_id": uid},
+            json={"query": q, "tenant_id": TENANT_ID, "user_id": uid},
         )
         if r.status_code != 200:
             fails.append((label, f"HTTP {r.status_code}"))
