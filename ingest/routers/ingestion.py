@@ -188,6 +188,77 @@ async def scan_gdrive_folder(
 
 
 # ──────────────────────────────────────
+# v2 pilot — universal Opus 4.7 pipeline (Phase-1 audit endpoint)
+# ──────────────────────────────────────
+# Isolated from the v1 dispatcher so production traffic is unaffected until
+# Phase 2 rollout. Uses ingest_v2 end-to-end: ensure_pdf → extract_hyperlinks
+# → Opus chunk+annotate → reuse _upsert. LibreOffice in this container is
+# what makes DOCX/XLSX/legacy coverage possible — local runs can't do this.
+
+@router.post("/v2/gdrive", response_model=GDriveIngestResult)
+@limiter.limit(ingestion_limit, key_func=ingestion_key_func)
+async def ingest_gdrive_folder_v2(
+    request: Request,
+    body: GDriveIngestRequest,
+    namespace_override: str | None = None,
+    tenant: dict = Depends(get_accessible_tenant),
+):
+    """v2 batch ingest from Google Drive — universal Opus pipeline (no v1 dispatch).
+
+    ``namespace_override`` lets Phase-1 audits write into a separate Pinecone
+    namespace (e.g. ``cutip_v2_audit``) so we can diff v2 output against v1's
+    production namespace without overwriting it. Defaults to the tenant's
+    real namespace for normal (non-audit) v2 traffic.
+    """
+    from ingest.services import ingestion_v2
+    from ingest.services.gdrive import download_file, list_files
+
+    namespace = namespace_override or tenant["pinecone_namespace"]
+    tenant_id = tenant["tenant_id"]
+    files = list_files(body.folder_id)
+    if not files:
+        return GDriveIngestResult(total_files=0, ingested=[], skipped=[], errors=[])
+
+    ingested: list[dict] = []
+    errors: list[dict] = []
+    skipped: list[dict] = []
+
+    for drive_file in files:
+        filename = drive_file["name"]
+        try:
+            file_bytes = download_file(drive_file["id"])
+            drive_link = f"https://drive.google.com/file/d/{drive_file['id']}/view"
+            chunks = await ingestion_v2.ingest_v2(
+                file_bytes=file_bytes,
+                filename=filename,
+                namespace=namespace,
+                tenant_id=tenant_id,
+                doc_category=body.doc_category,
+                download_link=drive_link,
+            )
+            ingested.append({"filename": filename, "chunks": chunks})
+            logger.info("v2 ingest '%s' (%d chunks) tenant=%s", filename, chunks, tenant_id)
+            await asyncio.sleep(3)  # rate limit between files (match v1 pacing)
+        except ValueError as exc:
+            # ensure_pdf rejects unsupported extensions — skip, not fail
+            skipped.append({"filename": filename, "reason": str(exc)})
+        except Exception:
+            logger.exception("v2 failed to ingest '%s'", filename)
+            errors.append({"filename": filename, "error": "v2 ingestion failed"})
+
+    if errors:
+        logger.warning(
+            "v2 gdrive batch partial: tenant=%s folder=%s total=%d ingested=%d skipped=%d failed=%d files=%s",
+            tenant_id, body.folder_id, len(files), len(ingested), len(skipped), len(errors),
+            [e["filename"] for e in errors],
+        )
+
+    return GDriveIngestResult(
+        total_files=len(files), ingested=ingested, skipped=skipped, errors=errors,
+    )
+
+
+# ──────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────
 
