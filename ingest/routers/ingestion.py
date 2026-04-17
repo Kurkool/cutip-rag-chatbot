@@ -274,6 +274,54 @@ async def ingest_gdrive_folder_v2(
     )
 
 
+@router.post("/v2/gdrive/file", response_model=IngestResponse)
+@limiter.limit(ingestion_limit, key_func=ingestion_key_func)
+async def ingest_gdrive_file_v2(
+    request: Request,
+    body: GDriveSingleRequest,
+    namespace_override: str | None = None,
+    tenant: dict = Depends(get_accessible_tenant),
+):
+    """Single-file v2 ingest from Google Drive (for retry of transient GDrive flakes).
+
+    Same namespace_override semantics as ``/v2/gdrive``.
+    """
+    from ingest.services import ingestion_v2
+    from ingest.services.gdrive import download_file, list_files
+
+    if namespace_override is not None and not namespace_override.endswith("_v2_audit"):
+        raise HTTPException(
+            status_code=400,
+            detail="namespace_override must end with '_v2_audit'",
+        )
+
+    namespace = namespace_override or tenant["pinecone_namespace"]
+    tenant_id = tenant["tenant_id"]
+
+    files = list_files(body.folder_id)
+    matched = [f for f in files if f["name"] == body.filename]
+    if not matched:
+        raise HTTPException(status_code=404, detail="File not found in Drive folder")
+
+    drive_file = matched[0]
+    file_bytes = download_file(drive_file["id"])
+    drive_link = f"https://drive.google.com/file/d/{drive_file['id']}/view"
+
+    chunks = await ingestion_v2.ingest_v2(
+        file_bytes=file_bytes,
+        filename=drive_file["name"],
+        namespace=namespace,
+        tenant_id=tenant_id,
+        doc_category=body.doc_category,
+        download_link=drive_link,
+    )
+
+    return IngestResponse(
+        message=f"Ingested '{drive_file['name']}' into namespace '{namespace}'",
+        chunks_processed=chunks,
+    )
+
+
 # ──────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────
