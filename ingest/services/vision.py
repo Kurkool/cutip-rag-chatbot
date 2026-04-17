@@ -6,7 +6,7 @@ import logging
 from langchain_core.messages import HumanMessage
 
 from shared.config import settings
-from shared.services.llm import get_haiku_vision
+from shared.services.llm import get_haiku_vision, get_ocr_llm
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,53 @@ _INTERPRET_SPREADSHEET_PROMPT = (
 )
 
 
-_get_vision_llm = get_haiku_vision  # Cached Claude Haiku for Vision
+# Two distinct LLM paths:
+# - OCR (PDF page images) → Opus 4.7 via get_ocr_llm — Thai OCR quality matters
+# - Spreadsheet layout → Haiku via get_haiku_vision — not OCR, cheap is fine
+_get_vision_llm = get_ocr_llm
+_get_spreadsheet_llm = get_haiku_vision
+
+
+# Phrases Opus/Haiku Vision emit when they can't OCR the page (blank, blurry,
+# or encoding-damaged). Any response containing these is a refusal string,
+# not document content — must be dropped, not stored as chunk text.
+_VISION_REFUSAL_PATTERNS = (
+    "ensure the image is clear",
+    "could you please",
+    "re-upload the document",
+    "readable document",
+    "no visible text",
+    "unable to see",
+    "cannot read",
+    "appears to be blank",
+    "file loaded correctly",
+    "i'll be happy",
+    "i cannot process",
+    "please provide",
+)
+
+
+def _looks_like_refusal(markdown: str) -> bool:
+    """Return True if Vision output is a refusal/error string, not content."""
+    if not markdown:
+        return False
+    lower = markdown.lower()
+    return any(p in lower for p in _VISION_REFUSAL_PATTERNS)
+
+
+def _extract_text_blocks(content) -> str:
+    """Opus 4.7 adaptive thinking returns list[block]; extract text blocks.
+
+    See ``chat/services/agent.py::run_agent`` for the corresponding pattern.
+    Without this, ``response.content`` would be ``list[dict]`` and we'd
+    upsert a stringified list as chunk content.
+    """
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+    return content or ""
 
 
 async def parse_page_image(image_bytes: bytes) -> str:
@@ -77,6 +123,11 @@ async def parse_page_image(image_bytes: bytes) -> str:
 
     Media type is autodetected from the blob's magic bytes (PNG/JPEG/GIF/WebP).
     Hardcoding PNG previously caused 400s on JPEG-embedded DOCX images.
+
+    Returns ``""`` (not a refusal string) when the model declines to OCR —
+    the caller treats empty as "page has no usable content" which is
+    preferable to storing "Could you please re-upload the document" as
+    searchable knowledge.
     """
     media_type = _detect_image_mime(image_bytes)
     b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
@@ -94,7 +145,14 @@ async def parse_page_image(image_bytes: bytes) -> str:
                 {"type": "text", "text": _PARSE_PAGE_PROMPT},
             ])
         ])
-        return response.content
+        markdown = _extract_text_blocks(response.content)
+        if _looks_like_refusal(markdown):
+            logger.warning(
+                "Vision returned a refusal/error string (%d chars) — dropping",
+                len(markdown),
+            )
+            return ""
+        return markdown
     except Exception as e:
         _log_api_error("Vision parse", e)
         return ""
@@ -104,8 +162,8 @@ async def interpret_spreadsheet(raw_text: str) -> str:
     """Send raw spreadsheet data to Claude, get back structured markdown."""
     try:
         prompt = _INTERPRET_SPREADSHEET_PROMPT.format(data=raw_text[:8000])
-        response = await _get_vision_llm().ainvoke(prompt)
-        return response.content
+        response = await _get_spreadsheet_llm().ainvoke(prompt)
+        return _extract_text_blocks(response.content) or raw_text
     except Exception as e:
         _log_api_error("Spreadsheet interpretation", e)
         return raw_text

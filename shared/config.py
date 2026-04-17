@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     # supports adaptive thinking. Sampling parameters (temperature/top_p/top_k)
     # are removed on 4.7; get_opus() no longer passes temperature.
     LLM_MODEL: str = "claude-opus-4-7"
+    # Vision OCR model — Opus 4.7 for accurate Thai OCR on scanned pages.
+    # Haiku 4.5 was tried first and dropped names / emitted refusal strings.
+    OCR_MODEL: str = "claude-opus-4-7"
     EMBEDDING_MODEL: str = "embed-v4.0"
     RERANKER_MODEL: str = "rerank-v3.5"
     # Haiku stays on 4.5 — sub-tasks (decompose/variants/rewrite/summarize/
