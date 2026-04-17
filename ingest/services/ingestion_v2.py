@@ -181,7 +181,6 @@ async def ingest_v2(
     filename: str,
     namespace: str,
     tenant_id: str,
-    skip_enrichment: bool = True,  # v2 default: Opus already enriched
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
@@ -196,8 +195,9 @@ async def ingest_v2(
       4. ``_upsert`` (reused from v1) — Cohere embed, Pinecone atomic swap,
          BM25 cross-process invalidation
 
-    ``skip_enrichment`` defaults to True: v2 does not want v1's
-    ``_enrich_with_context`` second pass — Opus already annotates.
+    v2 always skips v1's ``_enrich_with_context`` — Opus annotates each
+    chunk with section context in the single parse call. There is no
+    caller-facing override for this.
     """
     from ingest.services.ingestion import _build_metadata, _upsert
 
