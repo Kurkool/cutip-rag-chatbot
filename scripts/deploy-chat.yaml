@@ -1,0 +1,12 @@
+steps:
+- name: gcr.io/cloud-builders/docker
+  args: ['build', '-f', 'chat/Dockerfile', '-t', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/cutip-chat-api:latest', '.']
+- name: gcr.io/cloud-builders/docker
+  args: ['push', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/cutip-chat-api:latest']
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  entrypoint: gcloud
+  args: ['run', 'deploy', 'cutip-chat-api', '--region', 'asia-southeast1', '--image', 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/cutip-chat-api:latest', '--quiet']
+images:
+- 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/cutip-chat-api:latest'
+options:
+  logging: CLOUD_LOGGING_ONLY

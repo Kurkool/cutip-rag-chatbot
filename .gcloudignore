@@ -1,0 +1,42 @@
+# Cloud Build upload context excludes. Without this file Cloud Build falls
+# back to .gitignore — and the .venv/ can balloon the upload to 500MB+.
+
+# Python virtualenv + caches
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docs / tests (not needed in the container image)
+tests/
+docs/
+*.md
+!README.md
+
+# Local secrets — never upload
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+*.egg-info/
+build/
+dist/

@@ -161,6 +161,14 @@ async def mock_delete_tenant(tenant_id: str) -> bool:
     return True
 
 
+async def mock_bump_bm25_invalidate_ts(tenant_id: str) -> float:
+    import time as _time
+    ts = _time.time()
+    if tenant_id in fake_db.tenants:
+        fake_db.tenants[tenant_id]["bm25_invalidate_ts"] = ts
+    return ts
+
+
 async def mock_delete_tenant_cascade(tenant_id: str) -> dict:
     counts = {
         "chat_logs": 0,
@@ -402,6 +410,7 @@ _FIRESTORE_PATCHES = {
     "shared.services.firestore.update_tenant": mock_update_tenant,
     "shared.services.firestore.delete_tenant": mock_delete_tenant,
     "shared.services.firestore.delete_tenant_cascade": mock_delete_tenant_cascade,
+    "shared.services.firestore.bump_bm25_invalidate_ts": mock_bump_bm25_invalidate_ts,
     "shared.services.firestore.get_admin_user": mock_get_admin_user,
     "shared.services.firestore.list_admin_users": mock_list_admin_users,
     "shared.services.firestore.create_admin_user": mock_create_admin_user,

@@ -10,6 +10,37 @@ from shared.services.llm import get_haiku_vision
 
 logger = logging.getLogger(__name__)
 
+# Anthropic-supported image mime types. PDF rendering via PyMuPDF always
+# emits PNG, but DOCX blobs can be any embedded format (JPEG is common).
+# Hardcoding "image/png" previously caused 400 errors + silent caption
+# loss on JPEG-in-DOCX images (observed 2026-04-17).
+_MIME_PNG = "image/png"
+_MIME_JPEG = "image/jpeg"
+_MIME_GIF = "image/gif"
+_MIME_WEBP = "image/webp"
+
+
+def _detect_image_mime(image_bytes: bytes) -> str:
+    """Magic-byte sniff. Returns image/png as fallback for unknown formats."""
+    if not image_bytes or len(image_bytes) < 12:
+        return _MIME_PNG
+    head = image_bytes[:12]
+    # PNG: 89 50 4E 47 0D 0A 1A 0A
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return _MIME_PNG
+    # JPEG: FF D8 FF
+    if head.startswith(b"\xff\xd8\xff"):
+        return _MIME_JPEG
+    # GIF: 'GIF87a' or 'GIF89a'
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return _MIME_GIF
+    # WebP: 'RIFF' + 4 bytes + 'WEBP'
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return _MIME_WEBP
+    # Unknown: let Anthropic figure it out. image/png is least-surprising default.
+    logger.warning("Unknown image magic bytes: %s — defaulting to image/png", head[:4].hex())
+    return _MIME_PNG
+
 _PARSE_PAGE_PROMPT = (
     "Read this document page and convert to well-structured Markdown.\n\n"
     "Rules:\n"
@@ -42,7 +73,12 @@ _get_vision_llm = get_haiku_vision  # Cached Claude Haiku for Vision
 
 
 async def parse_page_image(image_bytes: bytes) -> str:
-    """Send a page image to Claude Vision, get back structured markdown."""
+    """Send a page image to Claude Vision, get back structured markdown.
+
+    Media type is autodetected from the blob's magic bytes (PNG/JPEG/GIF/WebP).
+    Hardcoding PNG previously caused 400s on JPEG-embedded DOCX images.
+    """
+    media_type = _detect_image_mime(image_bytes)
     b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
     try:
         response = await _get_vision_llm().ainvoke([
@@ -51,7 +87,7 @@ async def parse_page_image(image_bytes: bytes) -> str:
                     "type": "image",
                     "source": {
                         "type": "base64",
-                        "media_type": "image/png",
+                        "media_type": media_type,
                         "data": b64,
                     },
                 },

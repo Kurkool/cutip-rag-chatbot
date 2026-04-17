@@ -53,6 +53,10 @@ def get_raw_index():
 
 PINECONE_PAGE_SIZE = 100
 
+# Metadata key under which langchain-pinecone stores page content. Exposed
+# here so BM25 warm-up and any other consumer reads from one source of truth.
+VECTORSTORE_TEXT_KEY = "text"
+
 
 def _get_next_token(page) -> str | None:
     """Extract next pagination token, handling edge cases."""

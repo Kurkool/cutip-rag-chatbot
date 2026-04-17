@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from chat.services.reranker import _fmt_page
+
 logger = logging.getLogger(__name__)
 
 LINE_API_URL = "https://api.line.me/v2/bot/message/reply"
@@ -166,9 +168,9 @@ def _build_sources_flex(sources: list[dict[str, Any]]) -> dict | None:
             continue
         seen.add(name)
 
-        page = src.get("page", "")
+        page = _fmt_page(src.get("page", ""))
         label = name
-        if page and page != "N/A":
+        if page:
             label += f" (p.{page})"
 
         link = src.get("download_link", "")
