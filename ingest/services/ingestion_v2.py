@@ -21,6 +21,7 @@ from ingest.services._v2_prompts import (
     USER_PROMPT_TEMPLATE,
     format_sidecar,
 )
+from ingest.services.vision import _looks_like_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -153,18 +154,26 @@ async def opus_parse_and_chunk(
         return []
 
     raw_chunks = tool_calls[0].get("args", {}).get("chunks", [])
-    return [
-        Document(
-            page_content=c["text"],
+    cleaned: list[Document] = []
+    for c in raw_chunks:
+        text = (c.get("text") or "").strip()
+        if not text:
+            continue
+        if _looks_like_refusal(text):
+            logger.warning(
+                "opus_parse_and_chunk(%s): dropping refusal-pattern chunk on page %s",
+                filename, c.get("page", "?"),
+            )
+            continue
+        cleaned.append(Document(
+            page_content=text,
             metadata={
                 "page": int(c.get("page", 1)),
                 "section_path": c.get("section_path", ""),
                 "has_table": bool(c.get("has_table", False)),
             },
-        )
-        for c in raw_chunks
-        if c.get("text", "").strip()
-    ]
+        ))
+    return cleaned
 
 
 async def ingest_v2(
