@@ -155,3 +155,32 @@ async def test_opus_parse_and_chunk_happy_path(monkeypatch):
     assert chunks[0].metadata["page"] == 1
     assert chunks[0].metadata["has_table"] is False
     assert chunks[1].metadata["has_table"] is True
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_filters_refusal_chunks(monkeypatch):
+    """Chunks whose text matches a known refusal pattern are dropped."""
+    from langchain_core.messages import AIMessage
+
+    class FakeLLM:
+        def bind_tools(self, tools, tool_choice=None):
+            return self
+
+        async def ainvoke(self, messages):
+            return AIMessage(content="", tool_calls=[{
+                "name": "record_chunks",
+                "args": {
+                    "chunks": [
+                        {"text": "I cannot process this document — please re-upload.", "page": 1},
+                        {"text": "real substantive content about วิทยานิพนธ์", "page": 1},
+                    ],
+                },
+                "id": "c1",
+            }])
+
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: FakeLLM())
+
+    chunks = await ingestion_v2.opus_parse_and_chunk(b"%PDF-1.4\n%%EOF", [], "t.pdf")
+
+    assert len(chunks) == 1
+    assert "real substantive content" in chunks[0].page_content
