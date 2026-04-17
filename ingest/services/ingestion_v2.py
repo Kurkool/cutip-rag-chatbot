@@ -27,13 +27,25 @@ logger = logging.getLogger(__name__)
 
 
 def _get_opus_llm():
-    """Return the Opus 4.7 Vision LLM used for v2 parsing.
+    """Return the Opus 4.7 LLM used for v2 parse+chunk.
 
-    Reuses the existing OCR LLM factory. Kept as a private function so
-    tests can monkeypatch it without touching the shared services layer.
+    Constructs a FRESH Opus instance WITHOUT adaptive thinking. Anthropic
+    disallows enabling ``thinking`` when ``tool_choice`` forces a specific
+    tool — and v2 relies on forced tool use for deterministic chunk output.
+    We therefore cannot reuse ``shared.services.llm.get_ocr_llm`` (which
+    has ``thinking={"type": "adaptive"}`` for v1's free-text OCR path).
+
+    Kept as a module-level private function so tests can monkeypatch it
+    without touching the shared services layer.
     """
-    from shared.services.llm import get_ocr_llm
-    return get_ocr_llm()
+    from langchain_anthropic import ChatAnthropic
+    from shared.config import settings
+    return ChatAnthropic(
+        model=settings.OCR_MODEL,
+        anthropic_api_key=settings.ANTHROPIC_API_KEY,
+        max_tokens=8192,
+        max_retries=3,
+    )
 
 
 def ensure_pdf(file_bytes: bytes, filename: str) -> bytes:
