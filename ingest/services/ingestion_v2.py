@@ -47,7 +47,11 @@ def _get_opus_llm():
     return ChatAnthropic(
         model=settings.OCR_MODEL,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        max_tokens=8192,
+        # 32K output budget: slide decks (45+ pages × ~500 tokens/chunk) and
+        # dense announcement PDFs (23+ student records × ~300 tokens each)
+        # both overflowed the previous 8K cap, surfacing as silent 0-chunk
+        # returns when the tool_call JSON was truncated mid-array.
+        max_tokens=32000,
         max_retries=3,
     )
 

@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice-core libreoffice-writer \
+    libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY shared/ /app/shared/
