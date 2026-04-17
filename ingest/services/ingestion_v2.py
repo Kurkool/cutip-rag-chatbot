@@ -40,6 +40,10 @@ def extract_hyperlinks(pdf_bytes: bytes) -> list[dict]:
     to the link rectangle); ``uri`` is the target URL. Page numbering is
     1-based to match how users refer to pages.
 
+    URIs that already appear as visible text on the page are skipped —
+    Opus 4.7 reads them directly from the rendered PDF and a duplicate
+    sidecar entry would cause it to emit duplicate markdown links.
+
     Opus 4.7 reading a PDF cannot see link annotations — only the rendered
     visual. We inject this sidecar so generated chunks can still emit
     inline ``[anchor](uri)`` markdown links when relevant.
@@ -50,9 +54,15 @@ def extract_hyperlinks(pdf_bytes: bytes) -> list[dict]:
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     try:
         for page_index, page in enumerate(doc):
+            page_text = page.get_text("text")
             for link in page.get_links():
                 uri = link.get("uri", "")
                 if not uri:
+                    continue
+                # Skip URIs already visible in the rendered page text — Opus
+                # will read them directly. Sidecar is for *hidden* link
+                # annotations only (matches v1 behavior + v2 prompt contract).
+                if uri in page_text:
                     continue
                 rect = link.get("from", pymupdf.Rect())
                 anchor_text = page.get_text("text", clip=rect).strip() or uri

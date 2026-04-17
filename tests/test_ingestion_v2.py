@@ -73,3 +73,42 @@ def test_extract_hyperlinks_empty_pdf_returns_empty_list():
     links = ingestion_v2.extract_hyperlinks(pdf_bytes)
 
     assert links == []
+
+
+def test_extract_hyperlinks_skips_uris_already_visible_in_text():
+    """URIs that already appear as visible text should not be duplicated in the sidecar.
+
+    v2's Opus prompt tells the model that sidecar URIs are 'hidden in PDF
+    annotations and NOT visible on the rendered page'. If we leak a visible
+    URI into the sidecar, we break that contract and Opus emits duplicate
+    markdown links.
+    """
+    import pymupdf
+
+    doc = pymupdf.open()
+    page = doc.new_page()
+    # The URL is written as visible text on the page.
+    page.insert_text((72, 72), "Visit https://example.org/visible for details")
+    # And there's also a link annotation pointing to the SAME URL.
+    rect = pymupdf.Rect(72, 70, 400, 90)
+    page.insert_link({
+        "kind": pymupdf.LINK_URI,
+        "from": rect,
+        "uri": "https://example.org/visible",
+    })
+    # Plus a SECOND link whose URI is NOT visible in the text — this one must survive.
+    rect2 = pymupdf.Rect(72, 100, 400, 120)
+    page.insert_text((72, 102), "Click here for more")
+    page.insert_link({
+        "kind": pymupdf.LINK_URI,
+        "from": rect2,
+        "uri": "https://example.org/hidden",
+    })
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    links = ingestion_v2.extract_hyperlinks(pdf_bytes)
+
+    # Only the hidden one should be in the sidecar.
+    assert len(links) == 1
+    assert links[0]["uri"] == "https://example.org/hidden"
