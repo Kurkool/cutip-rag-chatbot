@@ -7,11 +7,32 @@ atomic-swap upsert as v1, so re-ingesting replaces prior v2 chunks.
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
+
+# Fetch ANTHROPIC_API_KEY from Secret Manager (fresh from current secret version)
+# and inject into the environment BEFORE importing v2 — pydantic-settings reads
+# ANTHROPIC_API_KEY at Settings class load time, which happens on first import
+# of any shared.config consumer. Local `.env` may be stale; Secret Manager is
+# the canonical source for deployed runs, so use it here too.
+def _load_anthropic_key_from_secret_manager() -> None:
+    try:
+        key = subprocess.check_output(
+            ["gcloud", "secrets", "versions", "access", "latest", "--secret=ANTHROPIC_API_KEY"],
+            shell=True,
+        ).decode().strip()
+        if key:
+            os.environ["ANTHROPIC_API_KEY"] = key
+            print(f"audit_v2: loaded ANTHROPIC_API_KEY from Secret Manager ({len(key)} chars)")
+    except Exception as exc:
+        print(f"audit_v2: WARNING — could not fetch ANTHROPIC_API_KEY from Secret Manager ({exc}); falling back to .env")
+
+_load_anthropic_key_from_secret_manager()
 
 from ingest.services.ingestion_v2 import ingest_v2
 
