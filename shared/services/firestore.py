@@ -90,6 +90,25 @@ def _delete_tenant_sync(tenant_id: str) -> bool:
     return True
 
 
+def _bump_bm25_invalidate_ts_sync(tenant_id: str) -> float:
+    """Write ``time.time()`` into the tenant doc so chat-api re-warms BM25.
+
+    Cross-process invalidation: ingest-worker writes this after every
+    successful upsert; chat-api reads it on every request via the tenant
+    dict already in its request context and compares with its in-process
+    ``BM25Index.warmed_ts``. Stale-cache window bounded by tenant-fetch
+    freshness (~per-request).
+    """
+    import time as _time
+    db = _get_db()
+    ts = _time.time()
+    doc_ref = db.collection(TENANTS_COLLECTION).document(tenant_id)
+    # Use set(merge=True) so missing tenant (shouldn't happen) creates field
+    # without overwriting other tenant fields.
+    doc_ref.set({"bm25_invalidate_ts": ts}, merge=True)
+    return ts
+
+
 def _delete_tenant_cascade_sync(tenant_id: str) -> dict[str, int]:
     """Delete a tenant plus all linked per-tenant records.
 
@@ -463,6 +482,7 @@ list_tenants = _async_wrap(_list_tenants_sync)
 update_tenant = _async_wrap(_update_tenant_sync)
 delete_tenant = _async_wrap(_delete_tenant_sync)
 delete_tenant_cascade = _async_wrap(_delete_tenant_cascade_sync)
+bump_bm25_invalidate_ts = _async_wrap(_bump_bm25_invalidate_ts_sync)
 
 # Chat Logs & Analytics
 log_chat = _async_wrap(_log_chat_sync)

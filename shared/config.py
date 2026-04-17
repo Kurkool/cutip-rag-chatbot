@@ -1,7 +1,7 @@
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
-APP_VERSION = "4.1.0"
+APP_VERSION = "6.1.0"
 
 
 class Settings(BaseSettings):
@@ -59,9 +59,14 @@ class Settings(BaseSettings):
         return v
 
     # Models
-    LLM_MODEL: str = "claude-opus-4-6"
+    # Opus 4.7 for the agent — same price as 4.6, better on long-horizon tool use,
+    # supports adaptive thinking. Sampling parameters (temperature/top_p/top_k)
+    # are removed on 4.7; get_opus() no longer passes temperature.
+    LLM_MODEL: str = "claude-opus-4-7"
     EMBEDDING_MODEL: str = "embed-v4.0"
     RERANKER_MODEL: str = "rerank-v3.5"
+    # Haiku stays on 4.5 — sub-tasks (decompose/variants/rewrite/summarize/
+    # enrichment/vision) don't need Opus; 5× cost for marginal gain.
     VISION_MODEL: str = "claude-haiku-4-5-20251001"
 
     # Chunking
@@ -70,7 +75,22 @@ class Settings(BaseSettings):
 
     # Retrieval
     RETRIEVAL_K: int = 10
-    TOP_K: int = 5
+    TOP_K: int = 5           # simple single-topic queries (default)
+    TOP_K_COMPLEX: int = 8   # multi-topic or comparison queries (more context)
+
+    # MMR (Maximal Marginal Relevance) — diversify rerank output
+    # 0.0 = pure diversity, 1.0 = pure relevance. 0.7 keeps relevance dominant
+    # while adding enough diversity to avoid top-K collapsing into near-duplicates.
+    MMR_LAMBDA: float = 0.7
+
+    # Search-quality telemetry thresholds
+    TELEMETRY_LOW_TOP1_SCORE: float = 0.3        # log if rerank top-1 < this
+    TELEMETRY_HIGH_TOOL_COUNT: int = 5           # log if agent makes this many+ tool calls
+
+    # Minimum rerank confidence for a chunk to reach the LLM as context. Below
+    # this is treated as irrelevant noise and filtered out. Tunable at runtime
+    # so we can loosen during defense Q&A if a valid answer exists but ranks low.
+    RERANKER_MIN_CONFIDENCE: float = 0.3
 
     # Conversation Memory
     MAX_HISTORY_TURNS: int = 5
@@ -102,6 +122,18 @@ class Settings(BaseSettings):
     PDF_BATCH_SIZE: int = 2  # concurrent Vision calls per batch (low to avoid rate limit)
     XLSX_BATCH_ROWS: int = 100  # rows per Claude interpretation batch
 
+    # Ingestion concurrency + retry — shared across enrichment, DOCX image vision,
+    # XLSX batch interpretation. Haiku allows ~50 req/min; 5 concurrent with
+    # exponential backoff stays well under that.
+    INGEST_CONCURRENCY: int = 5
+    INGEST_MAX_RETRIES: int = 3
+
+    # Pre-flight size limits — reject oversized docs at upload instead of
+    # silent timeout / 429 explosion after minutes of processing.
+    PDF_MAX_PAGES: int = 300
+    DOCX_MAX_IMAGES: int = 100
+    XLSX_MAX_ROWS: int = 20000   # total rows across all sheets
+
     # Semantic Chunking
     SEMANTIC_CHUNK_PERCENTILE: int = 90
 
@@ -109,7 +141,13 @@ class Settings(BaseSettings):
     RRF_K: int = 60
 
     # Agent loop
-    AGENT_RECURSION_LIMIT: int = 8  # max LangGraph ReAct steps per request
+    # Max LangGraph ReAct steps per request. Bumped from 8→12 for Opus 4.7:
+    # adaptive thinking consumes steps more aggressively on complex Thai
+    # queries, and LangGraph silently returns "Sorry, need more steps…" when
+    # remaining_steps < 2 with pending tool_calls (NOT a GraphRecursionError).
+    # 12 keeps us under that trigger for typical 2-3 search-call queries with
+    # room for one retry variant — without letting a broken loop run wild.
+    AGENT_RECURSION_LIMIT: int = 12
 
     model_config = {"env_file": ".env"}
 

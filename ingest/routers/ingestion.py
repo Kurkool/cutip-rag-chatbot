@@ -259,6 +259,17 @@ async def _process_gdrive_folder(
             logger.exception("Failed to ingest '%s'", filename)
             errors.append({"filename": filename, "error": "ingestion failed"})
 
+    # Partial-status visibility: when a batch finishes with ANY errors, emit a
+    # WARNING so Cloud Logging + Slack (if wired) surface it to the operator.
+    # Scheduler-driven runs otherwise return 200 OK with errors buried in the
+    # body — easy to miss.
+    if errors:
+        logger.warning(
+            "gdrive batch partial: tenant=%s folder=%s total=%d ingested=%d skipped=%d failed=%d files=%s",
+            tenant_id, folder_id, len(files), len(ingested), len(skipped), len(errors),
+            [e["filename"] for e in errors],
+        )
+
     return GDriveIngestResult(
         total_files=len(files), ingested=ingested, skipped=skipped, errors=errors,
     )

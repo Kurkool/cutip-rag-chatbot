@@ -16,14 +16,20 @@ if TYPE_CHECKING:
 
 @lru_cache()
 def get_opus() -> "ChatAnthropic":
-    """Claude Opus — main agentic reasoning (chat)."""
+    """Claude Opus 4.7 — main agentic reasoning (chat).
+
+    Opus 4.7 removes ``temperature``/``top_p``/``top_k`` (sending them 400s).
+    It also removes fixed ``budget_tokens`` thinking in favour of adaptive
+    thinking — enabled here since agentic RAG qualifies as "remotely
+    complicated" per the claude-api guidance.
+    """
     from langchain_anthropic import ChatAnthropic
     return ChatAnthropic(
         model=settings.LLM_MODEL,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        temperature=0.1,
         max_tokens=8192,
         max_retries=3,
+        thinking={"type": "adaptive"},
     )
 
 

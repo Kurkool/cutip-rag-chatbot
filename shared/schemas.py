@@ -91,6 +91,9 @@ class TenantCreate(BaseModel):
     line_channel_secret: str = Field(..., max_length=100)
     pinecone_namespace: str = Field(..., pattern=r"^[a-z0-9_-]+$", max_length=64)
     persona: str = Field(default="", max_length=5000)  # Empty = use DEFAULT_PERSONA from agent.py
+    # Google Drive folder for hourly auto-scan ingest. Empty string = opt-out
+    # (the scheduler's /scan-all skips tenants without this set).
+    drive_folder_id: str = Field(default="", max_length=200)
     is_active: bool = True
 
     @field_validator("faculty_name", "persona")
@@ -106,6 +109,7 @@ class TenantUpdate(BaseModel):
     line_channel_secret: str | None = Field(default=None, max_length=100)
     pinecone_namespace: str | None = Field(default=None, max_length=64)
     persona: str | None = Field(default=None, max_length=5000)
+    drive_folder_id: str | None = Field(default=None, max_length=200)
     is_active: bool | None = None
 
     @field_validator("faculty_name", "persona")
@@ -122,6 +126,7 @@ class TenantResponse(BaseModel):
     line_destination: str
     pinecone_namespace: str
     persona: str
+    drive_folder_id: str = ""
     is_active: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -190,6 +195,14 @@ class GDriveIngestResult(BaseModel):
     ingested: list[dict]
     skipped: list[dict]
     errors: list[dict]
+
+
+class ScanAllResult(BaseModel):
+    """Cross-tenant scan result used by the /api/ingest/scan-all scheduler path."""
+    total_tenants: int
+    processed: list[dict]        # [{tenant_id, total_files, ingested, skipped, errors}]
+    skipped_tenants: list[dict]  # [{tenant_id, reason}]
+    errored_tenants: list[dict]  # [{tenant_id, error}]
 
 
 # ──────────────────────────────────────

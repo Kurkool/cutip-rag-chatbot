@@ -3,7 +3,7 @@
 import json
 import logging
 import time
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from threading import Lock
 from typing import Any
 
@@ -34,6 +34,20 @@ _DEDUP_TTL_SECONDS = 300
 _dedup_lock = Lock()
 _dedup_cache: "OrderedDict[str, float]" = OrderedDict()
 
+# Per-tenant rate limit (post-identify). The route-level 600/min is keyed on
+# LINE's edge IP (shared across every LINE customer), so one tenant's spam
+# would throttle everyone. This secondary check runs AFTER we identify the
+# tenant from the LINE destination and is keyed by tenant_id — a noisy
+# cutip_01 cannot starve cutip_02 or cutip_03.
+#
+# Sliding-window counter: bucket holds timestamps of recent messages; entries
+# older than the window are evicted each call. Limit tuned for LINE-OA
+# realistic burst (even a noisy classroom rarely exceeds 30/min).
+_TENANT_WEBHOOK_WINDOW_SECONDS = 60.0
+_TENANT_WEBHOOK_LIMIT_PER_WINDOW = 60  # messages per minute per tenant
+_tenant_rate_lock = Lock()
+_tenant_rate_buckets: dict[str, list[float]] = defaultdict(list)
+
 
 def _default_user_id(tenant_id: str) -> str:
     """Namespace anonymous callers per-tenant so /api/chat without user_id
@@ -58,7 +72,34 @@ def _is_duplicate_event(event_id: str) -> bool:
             return True
         _dedup_cache[event_id] = now
     return False
+
+
+def _tenant_rate_check(tenant_id: str) -> bool:
+    """Sliding-window rate check for one tenant. True = within limit, False = exceeded."""
+    if not tenant_id:
+        return True  # defensive: shouldn't happen post-identify, don't block
+    now = time.time()
+    window_start = now - _TENANT_WEBHOOK_WINDOW_SECONDS
+    with _tenant_rate_lock:
+        bucket = _tenant_rate_buckets[tenant_id]
+        # Evict stale entries (sorted-by-insertion → trim-from-left once)
+        while bucket and bucket[0] < window_start:
+            bucket.pop(0)
+        if len(bucket) >= _TENANT_WEBHOOK_LIMIT_PER_WINDOW:
+            return False
+        bucket.append(now)
+    return True
+from shared.services.lang import is_thai
+
 ERROR_REPLY_THAI = "ขออภัยค่ะ เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง"
+ERROR_REPLY_ENGLISH = "Sorry, a system error occurred. Please try again."
+
+
+def _error_reply_for(query: str) -> str:
+    """Match the webhook error fallback to the user's query language so an
+    English-speaking user doesn't get a jarring Thai message during demo.
+    """
+    return ERROR_REPLY_THAI if is_thai(query) else ERROR_REPLY_ENGLISH
 
 
 # ──────────────────────────────────────
@@ -85,6 +126,16 @@ async def line_webhook(request: Request):
                 "[%s] dropping duplicate webhookEventId=%s",
                 tenant["tenant_id"], event.get("webhook_event_id"),
             )
+            continue
+        # Per-tenant rate shield (after dedup so retries don't waste a slot)
+        if not _tenant_rate_check(tenant["tenant_id"]):
+            logger.warning(
+                "[%s] tenant rate limit exceeded (>%d/min), dropping message from user=%s",
+                tenant["tenant_id"], _TENANT_WEBHOOK_LIMIT_PER_WINDOW,
+                event.get("user_id", "")[:8],
+            )
+            # Silent drop: no reply to user since replying would also cost API.
+            # Tenant admin will see the WARNING in Cloud Logging.
             continue
         await _handle_message_event(event, tenant)
 
@@ -165,7 +216,7 @@ async def _handle_message_event(event: dict[str, Any], tenant: dict[str, Any]) -
 
     except Exception as exc:
         logger.exception("[%s] FAILED for user=%s query='%s'", tenant_id, user_id[:8], query[:50])
-        await reply_message(event["reply_token"], ERROR_REPLY_THAI, token)
+        await reply_message(event["reply_token"], _error_reply_for(query), token)
 
         try:
             from shared.services.notifications import alert_error

@@ -20,20 +20,45 @@ _SAFE_OPS = {
     ast.USub: operator.neg,
 }
 
-def create_tools(namespace: str) -> tuple[list, Callable[[], list[dict]]]:
-    """Create tools scoped to a tenant's Pinecone namespace. Returns (tools, get_sources)."""
+def create_tools(
+    namespace: str,
+    history: list | dict | None = None,
+    user_id: str | None = None,
+    invalidate_ts: float = 0.0,
+) -> tuple[list, Callable[[], list[dict]]]:
+    """Create tools scoped to a tenant's Pinecone namespace.
+
+    ``history`` is threaded into the search tools so they can rewrite
+    follow-up queries with conversation context before searching.
+    ``user_id`` is threaded for telemetry correlation only (does not affect
+    retrieval).
+    ``invalidate_ts`` is the tenant's bm25_invalidate_ts from Firestore —
+    when the cached BM25 index is older than this, search re-warms from
+    Pinecone. This is how cross-process (ingest → chat) invalidation works.
+    Returns (tools, get_sources).
+    """
     collected_sources: list[dict] = []  # Per-request, not global
 
     @tool
     async def search_knowledge_base(query: str) -> str:
-        """Search the faculty's knowledge base.
-        Use this tool to find information about courses, curriculum, tuition,
-        forms, schedules, announcements, admission, and any faculty-related topics.
-        You can call this multiple times with different keywords if the first
-        search doesn't find what you need."""
+        """Search the faculty's entire knowledge base (all document types).
+
+        Use this when you don't know which document category the answer lives
+        in, or for broad topics spanning multiple types. Call this multiple
+        times with different keywords (English variants, Thai synonyms,
+        narrower scope) if the first search returns weak results — don't give
+        up after one try.
+
+        Returns formatted chunks tagged with confidence tiers and markdown
+        download links when available. Embed those links inline in your
+        final answer.
+        """
         try:
             from chat.services.search import search_with_sources
-            result, sources = await search_with_sources(query, namespace)
+            result, sources = await search_with_sources(
+                query, namespace, history=history, user_id=user_id,
+                invalidate_ts=invalidate_ts,
+            )
             collected_sources.extend(sources)
             return result
         except Exception as e:
@@ -42,13 +67,35 @@ def create_tools(namespace: str) -> tuple[list, Callable[[], list[dict]]]:
 
     @tool
     async def search_by_category(query: str, category: str) -> str:
-        """Search the knowledge base filtered by document category.
-        Use this when you know which type of document to look for.
-        Categories: curriculum, form, announcement, schedule, general, spreadsheet.
-        Example: search_by_category("ค่าเทอม", "curriculum")"""
+        """Search the knowledge base filtered to a specific document category.
+
+        Use this when you ALREADY know which type of document contains the
+        answer — it's faster and more precise than search_knowledge_base
+        because irrelevant categories are filtered out server-side.
+
+        Category → When to use:
+        - "curriculum": tuition, fees, course structure, credit requirements, GPA rules
+        - "form": application forms, enrollment, withdrawal, scholarship applications
+        - "announcement": deadlines, events, policy changes, news
+        - "schedule": class times, exam dates, academic calendar
+        - "regulation": academic rules, policies, conduct standards
+        - "general": catch-all for anything not matching the above
+
+        Examples:
+        - search_by_category("ค่าเทอม", "curriculum")
+        - search_by_category("ใบลาพักการเรียน", "form")
+        - search_by_category("กำหนดการสอบปลายภาค", "schedule")
+
+        If your first category guess returns weak results, try
+        search_knowledge_base instead — the answer may live in a different
+        category than expected.
+        """
         try:
             from chat.services.search import search_with_sources
-            result, sources = await search_with_sources(query, namespace, category=category)
+            result, sources = await search_with_sources(
+                query, namespace, category=category, history=history, user_id=user_id,
+                invalidate_ts=invalidate_ts,
+            )
             collected_sources.extend(sources)
             return result
         except Exception as e:
@@ -68,13 +115,27 @@ def create_tools(namespace: str) -> tuple[list, Callable[[], list[dict]]]:
 
     @tool
     async def fetch_webpage(url: str) -> str:
-        """Fetch and read a web page as text. Use when search results contain
-        a URL or link that might have additional relevant information."""
+        """Fetch and read a web page as plain text.
+
+        Use ONLY when the search result text is incomplete and explicitly
+        references an external page (e.g., "see details at https://..."). Do
+        NOT call this for every search result that contains a download_link
+        — for downloadable PDFs, forms, or documents, embed the INLINE_LINK
+        markdown in your final answer so the user can click and open it
+        directly. Calling this tool on every link wastes steps and slows the
+        response during a demo.
+
+        Times out at 8 seconds — if the page is slow or dead, tell the user
+        to open the document via the download link instead.
+        """
         import httpx
         if not url.startswith(("http://", "https://")):
             return "Only http(s) URLs are supported."
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
+            # 8s timeout: fail fast to avoid a 15s demo hang on slow/dead URLs.
+            # If the user really needs the page content, they can click the
+            # download link directly instead.
+            async with httpx.AsyncClient(timeout=8) as client:
                 response = await client.get(
                     f"https://r.jina.ai/{url}",
                     headers={"Accept": "text/plain"},
@@ -83,7 +144,11 @@ def create_tools(namespace: str) -> tuple[list, Callable[[], list[dict]]]:
                 return response.text[:3000]
         except Exception as exc:
             logger.info("fetch_webpage failed for %s: %s", url, exc)
-            return "Couldn't fetch that page."
+            return (
+                "Couldn't load that page in time. Tell the user to click "
+                "the download link in the previous answer to access the "
+                "document directly."
+            )
 
     def get_sources() -> list[dict]:
         """Return sources collected during this request's tool calls."""
