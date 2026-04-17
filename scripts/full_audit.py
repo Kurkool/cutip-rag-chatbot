@@ -82,14 +82,14 @@ def extract_source_text(path: Path) -> str:
     return ""
 
 
-def fetch_all_chunks(pc: Pinecone) -> dict[str, list[dict]]:
+def fetch_all_chunks(pc: Pinecone, namespace: str) -> dict[str, list[dict]]:
     idx = pc.Index("university-rag")
     all_ids = []
-    for page in idx.list(namespace="cutip_01"):
+    for page in idx.list(namespace=namespace):
         all_ids.extend(page)
     by_file: dict[str, list[dict]] = {}
     for i in range(0, len(all_ids), 50):
-        batch = idx.fetch(ids=all_ids[i : i + 50], namespace="cutip_01")
+        batch = idx.fetch(ids=all_ids[i : i + 50], namespace=namespace)
         for vid, v in batch.vectors.items():
             meta = v.metadata or {}
             fn = meta.get("source_filename", "?")
@@ -142,11 +142,12 @@ def diff_file(src_path: Path, chunks: list[dict]) -> dict:
 
 def retrieval_probe(
     client: httpx.Client, api_key: str, query: str, expect_filename: str,
+    namespace: str,
 ) -> dict:
     r = client.post(
         CHAT_URL,
         headers={"X-API-Key": api_key, "Content-Type": "application/json"},
-        json={"query": query, "tenant_id": "cutip_01", "user_id": "audit"},
+        json={"query": query, "tenant_id": namespace, "user_id": "audit"},
         timeout=120,
     )
     ok = r.status_code == 200
@@ -164,6 +165,17 @@ def retrieval_probe(
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Full ingestion audit")
+    parser.add_argument(
+        "--namespace",
+        default="cutip_01",
+        help="Pinecone namespace to audit (default: cutip_01, v1 production)",
+    )
+    args = parser.parse_args()
+    namespace = args.namespace
+
     key = subprocess.check_output(
         ["gcloud", "secrets", "versions", "access", "latest", "--secret=PINECONE_API_KEY"],
         shell=True,
@@ -175,7 +187,7 @@ def main():
     ).decode().strip()
 
     print("=== PHASE 1-3: SOURCE VS PINECONE DIFF ===\n")
-    by_file = fetch_all_chunks(pc)
+    by_file = fetch_all_chunks(pc, namespace)
     src_files = sorted([p for p in SAMPLE_DIR.iterdir() if p.is_file()])
     summary = []
     for p in src_files:
@@ -226,7 +238,7 @@ def main():
     with httpx.Client() as client:
         retrieval_results = []
         for q, expected in probes:
-            r = retrieval_probe(client, admin_key, q, expected)
+            r = retrieval_probe(client, admin_key, q, expected, namespace)
             retrieval_results.append(r)
             mark = "✅" if r["hit"] else "❌"
             print(f"{mark} q={q[:40]:40s} expect={expected[:30]:30s} got_top={r['top_files'][:2]}")
@@ -261,7 +273,7 @@ def main():
         for r in summary
     )
     retrieval_hits = sum(1 for r in retrieval_results if r["hit"])
-    print("\n=== SCORECARD ===")
+    print(f"\n=== SCORECARD (namespace={namespace}) ===")
     print(f"Files audited:        {len(summary)} / {len(src_files)} ingested")
     print(f"Entity drops:         {len(missing_names)} names + {len(missing_ids)} IDs missing from Pinecone")
     print(f"Per-file retrieval:   {retrieval_hits}/{len(retrieval_results)} probes landed on expected file")
