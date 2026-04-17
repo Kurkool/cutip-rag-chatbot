@@ -209,9 +209,25 @@ async def ingest_gdrive_folder_v2(
     namespace (e.g. ``cutip_v2_audit``) so we can diff v2 output against v1's
     production namespace without overwriting it. Defaults to the tenant's
     real namespace for normal (non-audit) v2 traffic.
+
+    SECURITY: ``namespace_override`` is restricted to names ending with
+    ``_v2_audit`` so that even an authenticated tenant-admin cannot
+    accidentally (or maliciously) write into another tenant's production
+    namespace, into a backup namespace, or into an arbitrary name. Keeps
+    the attack surface to "clearly-labelled audit namespaces only".
     """
     from ingest.services import ingestion_v2
     from ingest.services.gdrive import download_file, list_files
+
+    if namespace_override is not None and not namespace_override.endswith("_v2_audit"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "namespace_override must end with '_v2_audit' "
+                "(e.g. 'cutip_v2_audit'). This endpoint cannot be used to "
+                "write into arbitrary namespaces."
+            ),
+        )
 
     namespace = namespace_override or tenant["pinecone_namespace"]
     tenant_id = tenant["tenant_id"]

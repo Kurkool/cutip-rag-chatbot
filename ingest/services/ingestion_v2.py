@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+from functools import lru_cache
 from typing import Any
 
 from langchain_core.documents import Document
@@ -26,17 +27,20 @@ from ingest.services.vision import _looks_like_refusal
 logger = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=1)
 def _get_opus_llm():
-    """Return the Opus 4.7 LLM used for v2 parse+chunk.
+    """Return the Opus 4.7 LLM used for v2 parse+chunk (cached per process).
 
-    Constructs a FRESH Opus instance WITHOUT adaptive thinking. Anthropic
+    Constructs a single Opus instance WITHOUT adaptive thinking. Anthropic
     disallows enabling ``thinking`` when ``tool_choice`` forces a specific
     tool — and v2 relies on forced tool use for deterministic chunk output.
     We therefore cannot reuse ``shared.services.llm.get_ocr_llm`` (which
     has ``thinking={"type": "adaptive"}`` for v1's free-text OCR path).
 
-    Kept as a module-level private function so tests can monkeypatch it
-    without touching the shared services layer.
+    Cached so a batch audit (e.g. 14 PDFs) does not re-instantiate the
+    HTTP-pooled client once per file. Tests monkeypatch this function
+    directly — ``monkeypatch.setattr`` replaces the module attribute so the
+    cached original is bypassed entirely during the test.
     """
     from langchain_anthropic import ChatAnthropic
     from shared.config import settings
