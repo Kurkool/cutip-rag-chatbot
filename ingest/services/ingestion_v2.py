@@ -31,28 +31,33 @@ logger = logging.getLogger(__name__)
 def _get_opus_llm():
     """Return the Opus 4.7 LLM used for v2 parse+chunk (cached per process).
 
-    Constructs a single Opus instance WITHOUT adaptive thinking. Anthropic
-    disallows enabling ``thinking`` when ``tool_choice`` forces a specific
-    tool — and v2 relies on forced tool use for deterministic chunk output.
-    We therefore cannot reuse ``shared.services.llm.get_ocr_llm`` (which
-    has ``thinking={"type": "adaptive"}`` for v1's free-text OCR path).
+    Adaptive thinking is ENABLED. Anthropic disallows thinking when
+    ``tool_choice`` forces a specific tool, so ``opus_parse_and_chunk``
+    pairs this factory with ``tool_choice={"type": "auto"}`` — the system
+    prompt still instructs Opus to call ``record_chunks``, and Opus
+    reliably complies, but the model is free to think first. This
+    matters for long complex docs (45-page slide decks, dense
+    announcement PDFs with 20+ per-item records) where empirically the
+    non-thinking forced-tool path produced empty chunks after multi-
+    minute stalls.
 
     Cached so a batch audit (e.g. 14 PDFs) does not re-instantiate the
     HTTP-pooled client once per file. Tests monkeypatch this function
-    directly — ``monkeypatch.setattr`` replaces the module attribute so the
-    cached original is bypassed entirely during the test.
+    directly — ``monkeypatch.setattr`` replaces the module attribute so
+    the cached original is bypassed entirely during the test.
     """
     from langchain_anthropic import ChatAnthropic
     from shared.config import settings
     return ChatAnthropic(
         model=settings.OCR_MODEL,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        # 32K output budget: slide decks (45+ pages × ~500 tokens/chunk) and
-        # dense announcement PDFs (23+ student records × ~300 tokens each)
-        # both overflowed the previous 8K cap, surfacing as silent 0-chunk
+        # 32K output budget: slide decks (45+ pages × ~500 tokens/chunk)
+        # and dense announcement PDFs (23+ student records) both
+        # overflowed the previous 8K cap, surfacing as silent 0-chunk
         # returns when the tool_call JSON was truncated mid-array.
         max_tokens=32000,
         max_retries=3,
+        thinking={"type": "adaptive"},
     )
 
 
@@ -121,14 +126,18 @@ async def opus_parse_and_chunk(
     hyperlinks: list[dict],
     filename: str,
 ) -> list[Document]:
-    """Send PDF + sidecar to Opus 4.7 with forced tool use, return chunks.
+    """Send PDF + sidecar to Opus 4.7 with auto tool use, return chunks.
 
     Opus receives:
     - System prompt defining chunking rules and tool-call contract
     - User message: PDF as ``document`` content block + text describing
       filename and hyperlink sidecar
-    - Forced ``tool_choice="record_chunks"`` so the response always comes
-      back as structured JSON via tool arguments rather than free-form text
+    - ``tool_choice={"type": "auto"}`` — the system prompt instructs Opus
+      to call ``record_chunks`` exactly once, and in practice it does.
+      Forced tool_choice is intentionally NOT used: Anthropic disallows
+      adaptive thinking when a tool is forced, and without thinking
+      Opus silently returned empty chunk arrays on long/dense docs
+      (45-page slide decks, 20+ student announcement records).
 
     Returns a list of LangChain ``Document`` objects with metadata
     ``{page, section_path, has_table}``. Higher-level ``_upsert`` layers
@@ -161,7 +170,7 @@ async def opus_parse_and_chunk(
 
     llm = _get_opus_llm().bind_tools(
         [CHUNK_TOOL_SCHEMA],
-        tool_choice={"type": "tool", "name": CHUNK_TOOL_SCHEMA["name"]},
+        tool_choice={"type": "auto"},
     )
     response = await llm.ainvoke(messages)
 
