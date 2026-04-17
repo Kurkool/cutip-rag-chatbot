@@ -36,6 +36,21 @@ def _tokenize(text: str) -> list[str]:
     return re.findall(r"[\w\d]+", text.lower())
 
 
+_FILENAME_EXT_RE = re.compile(r"\.[a-zA-Z0-9]{2,4}$")
+
+
+def _doc_tokens(doc: Document) -> list[str]:
+    """Tokenize a document, prepending filename stem so lexical queries that
+    name a file (e.g. English "slide presentation" asking about slide.pdf)
+    can match even when the body is a different language from the query.
+    Without this, a Thai-content chunk with an English filename was
+    unreachable via BM25 for English queries.
+    """
+    filename = doc.metadata.get("source_filename", "") or ""
+    stem = _FILENAME_EXT_RE.sub("", filename)
+    return _tokenize(f"{stem} {doc.page_content}")
+
+
 class BM25Index:
     """In-memory BM25 index over a list of Documents.
 
@@ -49,7 +64,7 @@ class BM25Index:
     def __init__(self, documents: list[Document]):
         self.documents = documents
         self.warmed_ts = time.time()
-        corpus = [_tokenize(doc.page_content) for doc in documents]
+        corpus = [_doc_tokens(doc) for doc in documents]
         self._bm25 = BM25Okapi(corpus) if corpus else None
 
     def search(self, query: str, k: int = 10) -> list[Document]:

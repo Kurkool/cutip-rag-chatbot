@@ -238,17 +238,39 @@ async def ingest_pdf(
             page_num = i + 1
 
             # Has tables? (PyMuPDF can detect table structures)
-            has_tables = bool(page.find_tables().tables)
+            tables = page.find_tables().tables
+            has_tables = bool(tables)
 
-            if len(text) >= _VISION_THRESHOLD and not has_tables:
-                # Enough text, no tables → use text extraction (fast)
+            if len(text) >= _VISION_THRESHOLD:
+                # Digital PDF text layer is substantial — use it.
+                # Previously ANY table on the page kicked us into Vision,
+                # even when text extraction was perfect. Vision OCR is only
+                # genuinely better when the page is a scan (no text layer).
+                # For digital PDFs, rendering tables via PyMuPDF's native
+                # `to_markdown()` preserves all characters exactly, where
+                # Vision will silently drop Thai names and emit refusals.
+                # Audit 2026-04-17: announcement PDF lost 23/23 names
+                # because 1 table per page forced Vision on every page.
+                md_parts = [text]
+                if has_tables:
+                    for t in tables:
+                        try:
+                            md_parts.append(t.to_markdown())
+                        except Exception:
+                            logger.warning(
+                                "PyMuPDF table.to_markdown failed on %s page %d — "
+                                "text layer still captured",
+                                filename, page_num,
+                            )
                 if hidden_links:
-                    text += "\n\n**Links in this page:**\n" + "\n".join(
-                        f"- [{t}]({u})" for t, u in hidden_links
+                    md_parts.append(
+                        "**Links in this page:**\n" + "\n".join(
+                            f"- [{t}]({u})" for t, u in hidden_links
+                        )
                     )
-                pages_data.append({"text": text, "page": page_num})
+                pages_data.append({"text": "\n\n".join(md_parts), "page": page_num})
             else:
-                # Low text or has tables → need Vision
+                # Text layer empty/sparse → true scanned page → need Vision
                 pix = page.get_pixmap(dpi=150)
                 vision_pages.append({
                     "img_bytes": pix.tobytes("png"),

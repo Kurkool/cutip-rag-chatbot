@@ -50,3 +50,61 @@ def test_bm25_search_ranks_by_relevance():
     # Doc mentioning 2110101 twice should rank higher or equal
     assert len(results) >= 2
     assert "2110101" in results[0].page_content
+
+
+def test_bm25_filename_boosts_cross_language_match():
+    # Query in English, content in Thai, only the filename contains the
+    # English cue. Without filename tokenization the query misses the file.
+    # Corpus padded with unrelated docs so BM25 IDF is non-degenerate.
+    docs = [
+        Document(
+            page_content="ขั้นตอนการสอบวิทยานิพนธ์และการเตรียมเอกสาร",
+            metadata={"source_filename": "slide.pdf"},
+        ),
+        Document(
+            page_content="ทุนการศึกษาสำหรับนิสิตปริญญาโทและเอก",
+            metadata={"source_filename": "ทุนการศึกษา.docx"},
+        ),
+        Document(
+            page_content="ตารางเรียนภาคปลาย",
+            metadata={"source_filename": "schedule.xlsx"},
+        ),
+        Document(
+            page_content="ประกาศกรรมการสอบ",
+            metadata={"source_filename": "announce.pdf"},
+        ),
+    ]
+    idx = BM25Index(docs)
+    results = idx.search("slide presentation", k=2)
+    assert len(results) >= 1
+    assert results[0].metadata["source_filename"] == "slide.pdf"
+
+
+def test_bm25_filename_extension_stripped():
+    # Extension tokens (pdf/docx/xlsx) should NOT create spurious matches
+    # for queries that mention an extension word. Only content-level
+    # mentions should match.
+    docs = [
+        Document(
+            page_content="เนื้อหาเกี่ยวกับการวิจัย",
+            metadata={"source_filename": "research.pdf"},
+        ),
+        Document(
+            page_content="pdf เป็นรูปแบบเอกสารที่ใช้บ่อย",
+            metadata={"source_filename": "formats.docx"},
+        ),
+        Document(
+            page_content="เอกสารประกอบการเรียน",
+            metadata={"source_filename": "materials.docx"},
+        ),
+        Document(
+            page_content="ตารางเรียน",
+            metadata={"source_filename": "schedule.xlsx"},
+        ),
+    ]
+    idx = BM25Index(docs)
+    results = idx.search("pdf", k=4)
+    # Only content-level mention of 'pdf' should match. The stripped
+    # extensions must not leak 'pdf' into token streams.
+    assert len(results) == 1
+    assert results[0].metadata["source_filename"] == "formats.docx"

@@ -61,7 +61,12 @@ def get_haiku_precise() -> "ChatAnthropic":
 
 @lru_cache()
 def get_haiku_vision() -> "ChatAnthropic":
-    """Claude Haiku — Vision: PDF pages, spreadsheet interpretation (high token limit)."""
+    """Claude Haiku — Vision-lite: spreadsheet layout interpretation (no OCR).
+
+    Kept on Haiku because ``interpret_spreadsheet`` works from already-
+    extracted tabular text, not images — it's a layout/formatting task where
+    Haiku is both cheap and adequate.
+    """
     from langchain_anthropic import ChatAnthropic
     return ChatAnthropic(
         model=settings.VISION_MODEL,
@@ -69,4 +74,25 @@ def get_haiku_vision() -> "ChatAnthropic":
         temperature=0,
         max_tokens=4096,
         max_retries=3,
+    )
+
+
+@lru_cache()
+def get_ocr_llm() -> "ChatAnthropic":
+    """Claude Opus 4.7 — Vision OCR for PDF pages with Thai text.
+
+    Upgraded from Haiku 4.5 on 2026-04-17 after auditing an announcement PDF
+    with 23 Thai person names: Haiku dropped the whole list (OCR'd garbage
+    into names, emitted refusal strings like "Could you please re-upload")
+    while the fix-A text-layer path was still being built. Opus 4.7 Thai OCR
+    is dramatically more accurate; the cost hit is modest because Vision
+    only runs when the PyMuPDF text layer is truly empty (scanned pages).
+    """
+    from langchain_anthropic import ChatAnthropic
+    return ChatAnthropic(
+        model=settings.OCR_MODEL,
+        anthropic_api_key=settings.ANTHROPIC_API_KEY,
+        max_tokens=4096,
+        max_retries=3,
+        thinking={"type": "adaptive"},
     )
