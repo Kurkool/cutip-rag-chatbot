@@ -158,9 +158,31 @@ Aggregate `pytest tests/` passing does **not** mean ingestion is correct for a s
 ## When you pick this project up on another machine
 
 1. Run `git status` and `git log --oneline -10` — see which branch and where things stand.
-2. Check tenant state: `python -c "from google.cloud import firestore; db=firestore.Client(project='cutip-rag'); print(db.collection('tenants').document('cutip_01').get().to_dict()['pinecone_namespace'])"`. If it says `cutip_v2_audit`, a swap is still in effect — revert before production changes.
+2. Check tenant state: `python -c "from google.cloud import firestore; db=firestore.Client(project='cutip-rag'); print(db.collection('tenants').document('cutip_01').get().to_dict()['pinecone_namespace'])"`. **If it says `cutip_v2_audit`, a swap is still in effect — revert before production changes.** See §"Known pending state" below.
 3. Read `docs/architecture.md` §11 and `docs/thesis-project-detail.md` §7.6 for v2 context.
 4. Check auto-memory in the harness if available (`memory/MEMORY.md`) — it has machine-independent feedback lessons.
+
+## Known pending state (as of 2026-04-18, commit 4c2a491)
+
+**⚠️ Task: revert `cutip_01.pinecone_namespace` from `cutip_v2_audit` → `cutip_01`**
+
+A LINE-bot verification test temporarily pointed the production tenant at the v2 audit namespace. If no one reverted it, all LINE + admin-portal traffic is still hitting the 149 v2-audit chunks (14 sample docs) instead of the 106 production v1 chunks. Production data in namespace `cutip_01` is intact, just idle.
+
+Revert snippet:
+```python
+import time
+from google.cloud import firestore
+db = firestore.Client(project='cutip-rag')
+db.collection('tenants').document('cutip_01').update({
+    'pinecone_namespace': 'cutip_01',
+    'bm25_invalidate_ts': time.time(),
+})
+```
+chat-api re-warms BM25 on the next query automatically (logs `BM25 warmed for namespace 'cutip_01': 106 documents`). Smoke-test 1 LINE query after revert to confirm.
+
+## Where new docs must go
+
+`TIP-RAG/` (the parent workspace holding this repo + `admin-portal/` + `sample-doc/`) is **not** a git repo. Only this repo (`cutip-rag-chatbot/`) and `admin-portal/` are tracked. Any doc/spec/plan that must travel with the code — including `CLAUDE.md`, design specs, implementation plans, architecture diagrams — must live under `cutip-rag-chatbot/docs/` or `cutip-rag-chatbot/CLAUDE.md`. Pre-2026-04-18 legacy docs sat at `TIP-RAG/docs/` and had to be moved in commit 4c2a491; don't recreate that trap.
 
 ## Instruction priority
 
