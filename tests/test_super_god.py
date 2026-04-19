@@ -429,8 +429,9 @@ async def test_rewrite_query_haiku_failure_falls_back():
         mock_haiku.return_value = mock_llm
 
         history = [{"query": "q", "answer": "a"}]
-        out = await _rewrite_query_with_history("follow-up", history=history)
-        assert out == "follow-up"
+        # query contains a follow-up marker ("what about") so rewriter runs
+        out = await _rewrite_query_with_history("what about 5 years?", history=history)
+        assert out == "what about 5 years?"
 
 
 @pytest.mark.asyncio
@@ -442,10 +443,54 @@ async def test_rewrite_query_guards_against_oversized_output():
         mock_llm.ainvoke = AsyncMock(return_value=MagicMock(content="x" * 10000))
         mock_haiku.return_value = mock_llm
 
+        # query contains a follow-up marker so rewriter runs; too-long output rejected
         out = await _rewrite_query_with_history(
-            "short", history=[{"query": "q", "answer": "a"}],
+            "what about this one?", history=[{"query": "q", "answer": "a"}],
         )
-        assert out == "short"  # too-long rewrite rejected
+        assert out == "what about this one?"  # too-long rewrite rejected
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_standalone_skips_haiku():
+    """Regression (2026-04-19 demo): simple noun queries with no follow-up
+    markers must skip Haiku — Haiku empirically injects 'ดาวน์โหลด' / 'ฟอร์ม' /
+    'เกณฑ์' qualifiers that kill retrieval.
+    """
+    from chat.services.search import _rewrite_query_with_history
+
+    history = [{"query": "earlier question", "answer": "earlier answer"}]
+    standalone_queries = [
+        "ตารางเรียน",
+        "ประกาศ",
+        "สอบวิทยานิพนธ์",
+        "ค่าเทอม",
+        "หลักสูตรการจัดการเทคโนโลยีและนวัตกรรมผู้ประกอบการ",
+        "schedule",
+        "announcement",
+    ]
+    with patch("chat.services.search._get_haiku") as mock_haiku:
+        for q in standalone_queries:
+            out = await _rewrite_query_with_history(q, history=history)
+            assert out == q, f"standalone {q!r} rewritten to {out!r}"
+        mock_haiku.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rewrite_query_with_pronoun_still_calls_haiku():
+    """Queries with pronouns go through Haiku for context resolution."""
+    from chat.services.search import _rewrite_query_with_history
+
+    with patch("chat.services.search._get_haiku") as mock_haiku:
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            return_value=MagicMock(content="อ.กวิน สอนวิชาอะไร")
+        )
+        mock_haiku.return_value = mock_llm
+
+        history = [{"query": "อ.กวินคือใคร", "answer": "อาจารย์ในหลักสูตร"}]
+        out = await _rewrite_query_with_history("เขาสอนวิชาอะไร", history=history)
+        assert out == "อ.กวิน สอนวิชาอะไร"
+        mock_haiku.assert_called_once()
 
 
 # ──────────────────────────────────────

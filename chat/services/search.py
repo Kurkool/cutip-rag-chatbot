@@ -28,15 +28,40 @@ def _strip_json_fence(text: str) -> str:
 _DEDUP_PREFIX_LEN = 200
 
 _REWRITE_PROMPT = (
-    "Given the conversation history and the user's latest message, rewrite the "
-    "latest message as a standalone search query that captures what they really "
-    "want to find.\n\n"
-    "- If the latest message already stands alone, return it unchanged.\n"
-    "- Preserve the original language (Thai → Thai, English → English).\n"
-    "- Do not answer the question. Just rewrite it.\n\n"
+    "You rewrite a follow-up message into a standalone search query.\n\n"
+    "STRICT RULES:\n"
+    "1. PRESERVE ORIGINAL WORDS. Only resolve pronouns "
+    "(เขา/เธอ/มัน/นี่/นั่น/it/he/she/that/this) or elliptical references "
+    "(และอันที่สอง / what about X). NEVER add 'ดาวน์โหลด' (download), "
+    "'ฟอร์ม' (form), 'วิธีการ' (method), 'เกณฑ์' (requirements), or any word "
+    "not in the original.\n"
+    "2. If the latest message is already standalone (noun phrase or full "
+    "question with no pronouns), RETURN IT UNCHANGED verbatim.\n"
+    "3. Preserve the original language (Thai → Thai, English → English).\n"
+    "4. Do not remove content words from the original.\n"
+    "5. Do not answer, explain, or infer intent beyond literal text.\n\n"
+    "Examples:\n"
+    "'ตารางเรียน' → 'ตารางเรียน'\n"
+    "'ประกาศ' → 'ประกาศ'\n"
+    "'สอบวิทยานิพนธ์' → 'สอบวิทยานิพนธ์'\n"
+    "'เขาสอนวิชาอะไร' (history mentions 'อ.กวิน') → 'อ.กวิน สอนวิชาอะไร'\n"
+    "'what about 5 years?' (history: 'tuition for 4-year') → "
+    "'tuition for 5 years'\n\n"
     "History:\n{history}\n\n"
     "Latest message: {query}\n\n"
     "Rewritten query (no quotes, no explanation):"
+)
+
+# Query-level follow-up markers. A query without any of these is treated as
+# standalone and bypasses Haiku entirely — avoids the empirically-observed
+# bias where Haiku inserts 'ดาวน์โหลด' / 'ฟอร์ม' / 'เกณฑ์' qualifiers on
+# simple Thai noun queries during multi-turn demos (2026-04-19 demo findings).
+_FOLLOWUP_MARKERS = re.compile(
+    r"\b(he|she|it|they|them|this|that|these|those|"
+    r"what\s+about|how\s+about|also|and\s+the)\b"
+    r"|เขา|เธอ|มัน|นี่|นั่น|นี้|นั้น|ดังกล่าว|ข้างต้น|ข้างบน|"
+    r"แล้วอัน|ส่วนอัน",
+    re.IGNORECASE,
 )
 
 _DECOMPOSE_PROMPT = (
@@ -182,8 +207,17 @@ async def search_with_sources(
 async def _rewrite_query_with_history(
     query: str, history: list | dict | None,
 ) -> str:
-    """Rewrite a follow-up query into a standalone search query using history."""
+    """Rewrite a follow-up query into a standalone search query using history.
+
+    Short-circuits for queries without follow-up markers (pronouns / elliptical
+    references). This avoids Haiku's observed bias of injecting qualifiers
+    like 'ดาวน์โหลด' / 'ฟอร์ม' / 'เกณฑ์' on simple standalone Thai noun
+    queries — the rewriter is only needed when true follow-up context needs
+    to be merged in from history.
+    """
     if not history:
+        return query
+    if not _FOLLOWUP_MARKERS.search(query):
         return query
     history_text = format_history(history)
     if not history_text or history_text == "ไม่มีประวัติสนทนา":
