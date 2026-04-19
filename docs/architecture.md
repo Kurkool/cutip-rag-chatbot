@@ -104,12 +104,13 @@ graph LR
             LINE_SVC[line.py]
         end
 
-        subgraph "ingest/ (7 files)"
+        subgraph "ingest/ (v2 Opus universal, as of 2026-04-19)"
             I_MAIN[main.py]
-            INGEST_SVC[ingestion.py]
-            CHUNK[chunking.py]
-            ENRICH[enrichment.py]
-            VISION[vision.py]
+            V2[ingestion_v2.py]
+            V2_PROMPTS[_v2_prompts.py]
+            HELPERS[ingest_helpers.py]
+            VISION[vision.py<br/>refusal filter only]
+            GDRIVE[gdrive.py]
         end
 
         subgraph "admin/ (7 files)"
@@ -573,13 +574,15 @@ Ingested 14 sample documents from `sample-doc/cutip-doc/` into namespace `cutip_
 
 Net LOC delta (v1 → v2, *if v2 replaces v1*): **–1100 / +250 ≈ −85% ingestion surface**.
 
-### 11.6 Rollout Plan
+### 11.6 Rollout (completed 2026-04-19)
 
-v1 stays in production until:
-1. Phase-1 audit shows v2 ≥ v1 baseline on entity coverage + bot probes (in progress)
-2. Phase-2 feature-flags `INGEST_V2_ENABLED` per-tenant in Firestore, enabled for one non-prod tenant first
-3. Phase-3 cuts over `cutip_01` after 1-week soak
-4. Phase-4 deletes v1 code (`_smart_chunk`, `_fix_table_boundaries`, `_chunk_pages`, `_enrich_with_context`, `parse_page_image`, `interpret_spreadsheet`, format dispatcher)
+v2 is now the sole ingestion pipeline. v1 archived in the `legacy` branch.
+
+1. Phase-1 audit (2026-04-18): v2 entity coverage 24/24 Thai names, 23/23 student IDs, 2/2 emails — on par with v1 ✓
+2. Phase-2: skipped — single-tenant deployment, no feature flag needed
+3. Phase-3 cutover: all routes (`/document`, `/spreadsheet`, `/gdrive`, `/gdrive/scan`, `/gdrive/file`) now thin-wrap `ingest_v2()` — 2026-04-19
+4. Phase-4 (completed 2026-04-19): v1 dispatchers + helpers deleted. Removed: `ingest_pdf`, `ingest_docx`, `ingest_markdown`, `ingest_legacy`, `ingest_spreadsheet`, `_smart_chunk`, `_fix_table_boundaries`, `_chunk_pages`, `_enrich_with_context`, `parse_page_image`, `interpret_spreadsheet`, format dispatcher, chunking.py, enrichment.py. Shared helpers kept in renamed `ingest_helpers.py`: `_build_metadata`, `_convert_to_pdf`, `_delete_existing_vectors`, `_upsert`.
 
 Spec: `docs/superpowers/specs/2026-04-18-ingest-v2-design.md`
 Plan: `docs/superpowers/plans/2026-04-18-ingest-v2.md`
+Legacy branch (v1 reference): `legacy`

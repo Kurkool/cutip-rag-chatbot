@@ -1,10 +1,12 @@
 # CU TIP RAG Chatbot — Thesis Project Detail
 ## Multi-Tenant Agentic RAG Chatbot SaaS Platform for University Faculty Advisory
 
-**Version:** 4.2.0 (Production v1 + v2 universal ingestion pilot)
+**Version:** 4.2.0 (Production v1 pipeline + v2 universal ingestion pilot)
 **Author:** Kurkool Ussawadisayangkool
 **Institution:** Chulalongkorn University — Technopreneurship and Innovation Management Program (TIP)
 **Date:** 2026-04-18
+
+> **📎 Post-submission update (2026-04-19):** v1 ingestion pipeline described in §§3–6 of this document has been replaced by the v2 universal Opus 4.7 pipeline (§7.6) as the sole production path. The v1 code (`ingest_pdf`, `ingest_docx`, `ingest_markdown`, `ingest_spreadsheet`, `ingest_legacy`, `_smart_chunk`, `_fix_table_boundaries`, `_chunk_pages`, `_enrich_with_context`, `parse_page_image`, `interpret_spreadsheet`, `chunking.py`, `enrichment.py`) is preserved unchanged in the `legacy` git branch for thesis reference. The `POST /api/tenants/{id}/ingest/markdown` endpoint was also removed. Master now ships `ingest_helpers.py` (reduced to 4 shared helpers) + `ingestion_v2.py` + trimmed `vision.py`. Section 7.6 describes the v2 architecture.
 
 ---
 

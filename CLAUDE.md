@@ -107,7 +107,7 @@ Cloud Run URLs (stable): `https://cutip-{service}-265709916451.asia-southeast1.r
 
 ### Current deployed revisions (as of 2026-04-19)
 
-- `cutip-chat-api-00023-pf6` — ANTHROPIC_API_KEY rotated to v7
+- `cutip-chat-api-00024-gcr` — **rewriter bias fixed**: short-circuit Haiku on queries without follow-up markers (prevents empirically-observed 'ดาวน์โหลด/ฟอร์ม/เกณฑ์' qualifier injection on simple Thai noun queries — caused demo zero_results on `ตารางเรียน`, `ประกาศ`, `สอบวิทยานิพนธ์`); tighter `_REWRITE_PROMPT`; ANTHROPIC_API_KEY v7
 - `cutip-ingest-worker-00023-p2g` — **v1 dead code removed + review follow-ups**: all routes thin-wrap `ingest_v2`; `ingestion.py` renamed to `ingest_helpers.py` (helpers only, 195 lines); `vision.py` trimmed 185→32 lines; `enrichment.py` + `chunking.py` deleted; `IngestMarkdownRequest`+`IngestMetadata` schemas removed; `sheets_processed` deprecated to 0; `url: Form("")` restored on /document + /spreadsheet for forward-compat. v1 archived in `legacy` branch. +`fonts-thai-tlwg` + ANTHROPIC_API_KEY v7.
 - `cutip-admin-api-00009-zg9` — ANTHROPIC_API_KEY rotated to v7
 - `cutip-admin-portal-00010-wcg` — pre-demo rebuild: 2 lint fixes (React 19 `set-state-in-effect` rule on `settings/page.tsx`, `catch (err: any)` → `unknown` on `auth-context.tsx`)
