@@ -25,62 +25,69 @@ async def ingest_client(ingest_app):
         yield ac
 
 
-def _seed_tenant():
+def _seed_tenant(drive_folder_id: str = ""):
     fake_db.tenants.clear()
-    fake_db.tenants["tenant_a"] = dict(TENANT_A)
+    data = dict(TENANT_A)
+    data["drive_folder_id"] = drive_folder_id
+    fake_db.tenants["tenant_a"] = data
 
 
 # ──────────────────────────────────────
-# /document — PDF/DOC/DOCX upload
+# /stage — admin-portal upload → Drive → ingest with citation
 # ──────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_document_endpoint_routes_through_v2(ingest_client):
-    _seed_tenant()
-    fake_v2 = AsyncMock(return_value=5)
-    with patch("ingest.services.ingestion_v2.ingest_v2", fake_v2):
-        files = {"file": ("test.pdf", b"%PDF-1.4\nfake\n%%EOF", "application/pdf")}
+async def test_stage_upload_routes_via_drive_then_ingest_v2(ingest_client):
+    _seed_tenant(drive_folder_id="folderABC")
+    fake_upload = MagicMock(return_value={
+        "id": "driveFile123",
+        "name": "test.pdf",
+        "webViewLink": "https://drive.google.com/file/d/driveFile123/view",
+    })
+    fake_v2 = AsyncMock(return_value=8)
+    with patch("shared.services.gdrive.upload_file", fake_upload), \
+         patch("ingest.services.ingestion_v2.ingest_v2", fake_v2):
+        files = {"file": ("test.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")}
         r = await ingest_client.post(
-            "/api/tenants/tenant_a/ingest/document",
+            "/api/tenants/tenant_a/ingest/stage",
             headers=faculty_admin_headers(),
             files=files,
-            data={"doc_category": "form", "download_link": "https://drive/x"},
+            data={"doc_category": "announcement"},
         )
     assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["chunks_processed"] == 5
+    assert r.json()["chunks_processed"] == 8
+
+    # Drive upload happened with correct folder
+    fake_upload.assert_called_once()
+    up_args = fake_upload.call_args.args
+    assert up_args[1] == "test.pdf"        # filename
+    assert up_args[2] == "folderABC"       # folder_id
+
+    # ingest_v2 called with the Drive webViewLink as download_link → citation works
+    # + drive_file_id stored so admin delete survives Drive rename later
     fake_v2.assert_called_once()
     kwargs = fake_v2.call_args.kwargs
-    assert kwargs["filename"] == "test.pdf"
+    assert kwargs["download_link"] == "https://drive.google.com/file/d/driveFile123/view"
+    assert kwargs["drive_file_id"] == "driveFile123"
+    assert kwargs["doc_category"] == "announcement"
     assert kwargs["namespace"] == "ns-tenant-a"
-    assert kwargs["tenant_id"] == "tenant_a"
-    assert kwargs["doc_category"] == "form"
-    assert kwargs["download_link"] == "https://drive/x"
 
-
-# ──────────────────────────────────────
-# /spreadsheet — XLSX/CSV upload
-# ──────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_spreadsheet_endpoint_routes_through_v2(ingest_client):
-    _seed_tenant()
-    fake_v2 = AsyncMock(return_value=3)
-    with patch("ingest.services.ingestion_v2.ingest_v2", fake_v2):
-        files = {"file": ("data.xlsx", b"PK\x03\x04\x14\x00",
-                          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+async def test_stage_upload_requires_connected_drive_folder(ingest_client):
+    _seed_tenant(drive_folder_id="")  # not connected
+    with patch("shared.services.gdrive.upload_file") as fake_upload, \
+         patch("ingest.services.ingestion_v2.ingest_v2") as fake_v2:
+        files = {"file": ("test.pdf", b"%PDF-1.4\n%%EOF", "application/pdf")}
         r = await ingest_client.post(
-            "/api/tenants/tenant_a/ingest/spreadsheet",
+            "/api/tenants/tenant_a/ingest/stage",
             headers=faculty_admin_headers(),
             files=files,
-            data={"doc_category": "general"},
         )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["chunks_processed"] == 3
-    assert body["sheets_processed"] == 0  # deprecated post-v2 cutover (sheet concept lost in PDF conversion)
-    fake_v2.assert_called_once()
-    assert fake_v2.call_args.kwargs["filename"] == "data.xlsx"
+    assert r.status_code == 400
+    assert "connected Drive folder" in r.json()["detail"]
+    fake_upload.assert_not_called()
+    fake_v2.assert_not_called()
 
 
 # ──────────────────────────────────────
@@ -96,8 +103,8 @@ async def test_gdrive_file_endpoint_routes_through_v2(ingest_client):
     ])
     fake_download = MagicMock(return_value=b"%PDF-1.4\nfake\n%%EOF")
     with patch("ingest.services.ingestion_v2.ingest_v2", fake_v2), \
-         patch("ingest.services.gdrive.list_files", fake_list), \
-         patch("ingest.services.gdrive.download_file", fake_download):
+         patch("shared.services.gdrive.list_files", fake_list), \
+         patch("shared.services.gdrive.download_file", fake_download):
         r = await ingest_client.post(
             "/api/tenants/tenant_a/ingest/gdrive/file",
             headers=faculty_admin_headers(),
@@ -127,8 +134,8 @@ async def test_gdrive_batch_routes_all_files_through_v2(ingest_client):
     ])
     fake_download = MagicMock(return_value=b"%PDF-1.4")
     with patch("ingest.services.ingestion_v2.ingest_v2", fake_v2), \
-         patch("ingest.services.gdrive.list_files", fake_list), \
-         patch("ingest.services.gdrive.download_file", fake_download), \
+         patch("shared.services.gdrive.list_files", fake_list), \
+         patch("shared.services.gdrive.download_file", fake_download), \
          patch("ingest.routers.ingestion.asyncio.sleep", AsyncMock()):  # skip 3s pacing
         r = await ingest_client.post(
             "/api/tenants/tenant_a/ingest/gdrive",
@@ -147,6 +154,114 @@ async def test_gdrive_batch_routes_all_files_through_v2(ingest_client):
 # ──────────────────────────────────────
 
 @pytest.mark.asyncio
+async def test_gdrive_scan_detects_rename(ingest_client):
+    """Rename in Drive: same drive_file_id, different name → delete old vectors + re-ingest new name."""
+    _seed_tenant()
+    fake_v2 = AsyncMock(return_value=2)
+    fake_delete = MagicMock(return_value=5)
+    # Drive now has the file under a new name (same id)
+    fake_list = MagicMock(return_value=[
+        {"id": "file_rename", "name": "new_name.pdf",
+         "mimeType": "application/pdf",
+         "modifiedTime": "2026-04-20T10:00:00.000Z"},
+    ])
+    fake_download = MagicMock(return_value=b"%PDF-1.4")
+    # Pinecone has chunks for old_name.pdf with same drive_file_id
+    fake_state = MagicMock(return_value={
+        "file_rename": {"filename": "old_name.pdf", "ingest_ts": 1.0},
+    })
+    fake_existing = MagicMock(return_value={"old_name.pdf"})
+    with patch("ingest.services.ingestion_v2.ingest_v2", fake_v2), \
+         patch("shared.services.gdrive.list_files", fake_list), \
+         patch("shared.services.gdrive.download_file", fake_download), \
+         patch("shared.services.vectorstore.get_existing_drive_state", fake_state), \
+         patch("shared.services.vectorstore.delete_vectors_by_filename", fake_delete), \
+         patch("ingest.routers.ingestion._get_existing_filenames", fake_existing), \
+         patch("ingest.routers.ingestion.asyncio.sleep", AsyncMock()):
+        r = await ingest_client.post(
+            "/api/tenants/tenant_a/ingest/gdrive/scan",
+            headers=faculty_admin_headers(),
+            json={"folder_id": "folderid", "doc_category": "general"},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # Old filename's chunks deleted
+    fake_delete.assert_called_once_with("ns-tenant-a", "old_name.pdf")
+    # New filename ingested
+    assert fake_v2.call_count == 1
+    assert fake_v2.call_args.kwargs["filename"] == "new_name.pdf"
+    assert fake_v2.call_args.kwargs["drive_file_id"] == "file_rename"
+    assert len(body["ingested"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_gdrive_scan_skips_unmodified_file(ingest_client):
+    """Drive file modifiedTime ≤ Pinecone ingest_ts → skip (no-op)."""
+    _seed_tenant()
+    fake_v2 = AsyncMock(return_value=0)
+    fake_list = MagicMock(return_value=[
+        {"id": "file_stable", "name": "stable.pdf",
+         "mimeType": "application/pdf",
+         "modifiedTime": "2026-04-19T00:00:00.000Z"},  # older than ingest_ts
+    ])
+    # ingest_ts = 2026-04-20 (unix ~1776614400) — NEWER than Drive modifiedTime
+    import datetime
+    future_ts = datetime.datetime(2026, 4, 20, tzinfo=datetime.timezone.utc).timestamp()
+    fake_state = MagicMock(return_value={
+        "file_stable": {"filename": "stable.pdf", "ingest_ts": future_ts},
+    })
+    fake_existing = MagicMock(return_value={"stable.pdf"})
+    with patch("ingest.services.ingestion_v2.ingest_v2", fake_v2), \
+         patch("shared.services.gdrive.list_files", fake_list), \
+         patch("shared.services.gdrive.download_file") as fake_dl, \
+         patch("shared.services.vectorstore.get_existing_drive_state", fake_state), \
+         patch("ingest.routers.ingestion._get_existing_filenames", fake_existing):
+        r = await ingest_client.post(
+            "/api/tenants/tenant_a/ingest/gdrive/scan",
+            headers=faculty_admin_headers(),
+            json={"folder_id": "folderid", "doc_category": "general"},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    fake_v2.assert_not_called()
+    fake_dl.assert_not_called()
+    assert len(body["skipped"]) == 1
+    assert body["skipped"][0]["reason"] == "up to date"
+
+
+@pytest.mark.asyncio
+async def test_gdrive_scan_detects_overwrite(ingest_client):
+    """Drive file modifiedTime > Pinecone ingest_ts, same name → re-ingest."""
+    _seed_tenant()
+    fake_v2 = AsyncMock(return_value=3)
+    fake_list = MagicMock(return_value=[
+        {"id": "file_updated", "name": "doc.pdf",
+         "mimeType": "application/pdf",
+         "modifiedTime": "2026-04-20T12:00:00.000Z"},
+    ])
+    fake_state = MagicMock(return_value={
+        "file_updated": {"filename": "doc.pdf", "ingest_ts": 1.0},  # very old ts
+    })
+    fake_existing = MagicMock(return_value={"doc.pdf"})
+    fake_download = MagicMock(return_value=b"%PDF-1.4")
+    with patch("ingest.services.ingestion_v2.ingest_v2", fake_v2), \
+         patch("shared.services.gdrive.list_files", fake_list), \
+         patch("shared.services.gdrive.download_file", fake_download), \
+         patch("shared.services.vectorstore.get_existing_drive_state", fake_state), \
+         patch("ingest.routers.ingestion._get_existing_filenames", fake_existing), \
+         patch("ingest.routers.ingestion.asyncio.sleep", AsyncMock()):
+        r = await ingest_client.post(
+            "/api/tenants/tenant_a/ingest/gdrive/scan",
+            headers=faculty_admin_headers(),
+            json={"folder_id": "folderid", "doc_category": "general"},
+        )
+    assert r.status_code == 200, r.text
+    # OVERWRITE triggered re-ingest (no delete call — _upsert handles dedup)
+    fake_v2.assert_called_once()
+    assert fake_v2.call_args.kwargs["filename"] == "doc.pdf"
+
+
+@pytest.mark.asyncio
 async def test_gdrive_scan_skips_existing_and_routes_new_through_v2(ingest_client):
     _seed_tenant()
     fake_v2 = AsyncMock(return_value=1)
@@ -157,8 +272,8 @@ async def test_gdrive_scan_skips_existing_and_routes_new_through_v2(ingest_clien
     fake_download = MagicMock(return_value=b"%PDF-1.4")
     fake_existing = MagicMock(return_value={"already.pdf"})
     with patch("ingest.services.ingestion_v2.ingest_v2", fake_v2), \
-         patch("ingest.services.gdrive.list_files", fake_list), \
-         patch("ingest.services.gdrive.download_file", fake_download), \
+         patch("shared.services.gdrive.list_files", fake_list), \
+         patch("shared.services.gdrive.download_file", fake_download), \
          patch("ingest.routers.ingestion._get_existing_filenames", fake_existing), \
          patch("ingest.routers.ingestion.asyncio.sleep", AsyncMock()):
         r = await ingest_client.post(

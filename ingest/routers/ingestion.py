@@ -10,7 +10,6 @@ from shared.schemas import (
     GDriveIngestResult,
     GDriveSingleRequest,
     IngestResponse,
-    IngestSpreadsheetResponse,
 )
 from ingest.services import ingestion_v2
 from shared.services.auth import get_accessible_tenant
@@ -26,57 +25,84 @@ ALLOWED_SHEET_EXTENSIONS = {".xlsx", ".csv"}
 
 
 # ──────────────────────────────────────
-# File upload endpoints
+# Stage upload — admin portal uploads → Drive → ingest with citation
 # ──────────────────────────────────────
+# The old /document and /spreadsheet direct-ingest handlers were removed on
+# 2026-04-20 because they produced chunks without a download_link → chat
+# citations couldn't resolve to a clickable URL. Admin portal now uploads
+# exclusively through /stage (Drive → ingest_v2 with webViewLink).
 
-@router.post("/document", response_model=IngestResponse)
+@router.post("/stage", response_model=IngestResponse)
 @limiter.limit(ingestion_limit, key_func=ingestion_key_func)
-async def ingest_document(
+async def stage_document(
     request: Request,
     file: UploadFile = File(...),
     doc_category: str = Form("general"),
-    url: str = Form(""),
-    download_link: str = Form(""),
     tenant: dict = Depends(get_accessible_tenant),
 ):
-    """Ingest PDF / DOC / DOCX via v2 Opus pipeline."""
-    file_bytes = await validate_upload(file, ALLOWED_DOC_EXTENSIONS)
+    """Upload a file to the tenant's connected Drive folder, then ingest it.
+
+    The staging flow exists because direct ingestion via /document or
+    /spreadsheet leaves chunks with empty download_link → chat citations
+    can't resolve to a clickable URL. By uploading to Drive first and using
+    the Drive webViewLink as download_link, admin-uploaded files become
+    citable just like Drive-synced files.
+
+    Requires the tenant's ``drive_folder_id`` to be set (via /gdrive/connect)
+    and the service account to have Editor role on that folder.
+    """
+    from shared.services.gdrive import upload_file
+
+    if not tenant.get("drive_folder_id"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Tenant has no connected Drive folder. Ask an admin to "
+                "connect Google Drive in the admin portal first."
+            ),
+        )
+
+    allowed = ALLOWED_DOC_EXTENSIONS | ALLOWED_SHEET_EXTENSIONS
+    file_bytes = await validate_upload(file, allowed)
     filename = fix_filename(file.filename or "unknown")
     namespace = tenant["pinecone_namespace"]
+    mime_type = file.content_type or "application/octet-stream"
 
+    try:
+        drive_result = await asyncio.to_thread(
+            upload_file, file_bytes, filename,
+            tenant["drive_folder_id"], mime_type,
+        )
+    except Exception as exc:
+        logger.exception("Drive stage upload failed for '%s'", filename)
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Failed to stage '{filename}' to Drive: {exc}. "
+                "The service account may not have Editor role on the folder — "
+                "re-run Connect from the admin portal."
+            ),
+        )
+
+    drive_link = drive_result.get("webViewLink", "")
+    drive_id = drive_result.get("id", "")
+    logger.info(
+        "Staged '%s' to Drive (file_id=%s) for tenant %s",
+        filename, drive_id, tenant["tenant_id"],
+    )
+
+    # Ingest the bytes we already have; no need to re-download from Drive.
     chunks = await ingestion_v2.ingest_v2(
-        file_bytes=file_bytes, filename=filename, namespace=namespace,
-        tenant_id=tenant["tenant_id"], doc_category=doc_category,
-        url=url, download_link=download_link,
+        file_bytes=file_bytes,
+        filename=filename,
+        namespace=namespace,
+        tenant_id=tenant["tenant_id"],
+        doc_category=doc_category,
+        download_link=drive_link,
+        drive_file_id=drive_id,
     )
     return IngestResponse(
-        message=f"Ingested '{filename}' into namespace '{namespace}'",
-        chunks_processed=chunks,
-    )
-
-
-@router.post("/spreadsheet", response_model=IngestSpreadsheetResponse)
-@limiter.limit(ingestion_limit, key_func=ingestion_key_func)
-async def ingest_spreadsheet(
-    request: Request,
-    file: UploadFile = File(...),
-    doc_category: str = Form("general"),
-    url: str = Form(""),
-    download_link: str = Form(""),
-    tenant: dict = Depends(get_accessible_tenant),
-):
-    """Ingest XLSX / CSV via v2 Opus pipeline."""
-    file_bytes = await validate_upload(file, ALLOWED_SHEET_EXTENSIONS)
-    filename = fix_filename(file.filename or "unknown")
-    namespace = tenant["pinecone_namespace"]
-
-    chunks = await ingestion_v2.ingest_v2(
-        file_bytes=file_bytes, filename=filename, namespace=namespace,
-        tenant_id=tenant["tenant_id"], doc_category=doc_category,
-        url=url, download_link=download_link,
-    )
-    return IngestSpreadsheetResponse(
-        message=f"Ingested '{filename}' into namespace '{namespace}'",
+        message=f"Staged '{filename}' to Drive and ingested {chunks} chunks",
         chunks_processed=chunks,
     )
 
@@ -93,7 +119,7 @@ async def ingest_gdrive_file(
     tenant: dict = Depends(get_accessible_tenant),
 ):
     """Ingest a single file from Google Drive (v2 pipeline)."""
-    from ingest.services.gdrive import download_file, list_files
+    from shared.services.gdrive import download_file, list_files
 
     namespace = tenant["pinecone_namespace"]
     files = list_files(body.folder_id)
@@ -108,7 +134,7 @@ async def ingest_gdrive_file(
     chunks = await ingestion_v2.ingest_v2(
         file_bytes=file_bytes, filename=drive_file["name"], namespace=namespace,
         tenant_id=tenant["tenant_id"], doc_category=body.doc_category,
-        download_link=drive_link,
+        download_link=drive_link, drive_file_id=drive_file["id"],
     )
     return IngestResponse(
         message=f"Ingested '{drive_file['name']}' into namespace '{namespace}'",
@@ -160,7 +186,7 @@ async def ingest_gdrive_folder_v2(
     that even an authenticated tenant-admin cannot accidentally write into
     another tenant's production namespace or an arbitrary name.
     """
-    from ingest.services.gdrive import download_file, list_files
+    from shared.services.gdrive import download_file, list_files
 
     if namespace_override is not None and not namespace_override.endswith("_v2_audit"):
         raise HTTPException(
@@ -190,7 +216,7 @@ async def ingest_gdrive_folder_v2(
             chunks = await ingestion_v2.ingest_v2(
                 file_bytes=file_bytes, filename=filename, namespace=namespace,
                 tenant_id=tenant_id, doc_category=body.doc_category,
-                download_link=drive_link,
+                download_link=drive_link, drive_file_id=drive_file["id"],
             )
             ingested.append({"filename": filename, "chunks": chunks})
             logger.info("v2 ingest '%s' (%d chunks) tenant=%s", filename, chunks, tenant_id)
@@ -222,7 +248,7 @@ async def ingest_gdrive_file_v2(
     tenant: dict = Depends(get_accessible_tenant),
 ):
     """Single-file v2 ingest with optional namespace_override for audits."""
-    from ingest.services.gdrive import download_file, list_files
+    from shared.services.gdrive import download_file, list_files
 
     if namespace_override is not None and not namespace_override.endswith("_v2_audit"):
         raise HTTPException(
@@ -245,7 +271,7 @@ async def ingest_gdrive_file_v2(
     chunks = await ingestion_v2.ingest_v2(
         file_bytes=file_bytes, filename=drive_file["name"], namespace=namespace,
         tenant_id=tenant_id, doc_category=body.doc_category,
-        download_link=drive_link,
+        download_link=drive_link, drive_file_id=drive_file["id"],
     )
     return IngestResponse(
         message=f"Ingested '{drive_file['name']}' into namespace '{namespace}'",
@@ -263,11 +289,38 @@ def _get_existing_filenames(namespace: str) -> set[str]:
     return get_unique_filenames(namespace)
 
 
+def _iso_to_unix(iso_str: str) -> float:
+    """Parse Drive's RFC3339 ``modifiedTime`` (e.g. ``2026-04-20T10:00:00.000Z``)
+    into a Unix timestamp for comparison with Pinecone ``ingest_ts``.
+    Returns 0.0 on parse failure (conservative: will trigger re-ingest).
+    """
+    if not iso_str:
+        return 0.0
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(iso_str.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
 async def _process_gdrive_folder(
     tenant: dict, folder_id: str, doc_category: str, skip_existing: bool,
 ) -> GDriveIngestResult:
-    """Core logic for batch/scan Drive ingestion — all files go through v2."""
-    from ingest.services.gdrive import download_file, list_files
+    """Core logic for batch/scan Drive ingestion — all files go through v2.
+
+    When ``skip_existing`` is True (Smart Scan / scheduler), compares Drive
+    state against Pinecone per drive_file_id:
+
+      * NEW — drive_file_id not seen before → ingest
+      * RENAME — same id, different Drive name → delete old vectors + re-ingest
+      * OVERWRITE — same id, same name, Drive ``modifiedTime`` > ``ingest_ts`` → re-ingest
+      * SKIP — same id, same name, Drive not newer → no-op
+
+    Legacy chunks (no drive_file_id, ingested pre 2026-04-20) fall back to
+    filename-based skip.
+    """
+    from shared.services.gdrive import download_file, list_files
+    from shared.services.vectorstore import get_existing_drive_state, delete_vectors_by_filename
 
     namespace = tenant["pinecone_namespace"]
     tenant_id = tenant["tenant_id"]
@@ -276,23 +329,58 @@ async def _process_gdrive_folder(
     if not files:
         return GDriveIngestResult(total_files=0, ingested=[], skipped=[], errors=[])
 
-    existing = await asyncio.to_thread(_get_existing_filenames, namespace) if skip_existing else set()
+    # Build existing state from Pinecone (only when skip_existing enabled)
+    if skip_existing:
+        drive_state = await asyncio.to_thread(get_existing_drive_state, namespace)
+        legacy_filenames = await asyncio.to_thread(_get_existing_filenames, namespace)
+        # Filenames covered by drive_state (new chunks) vs only-legacy (no drive_file_id)
+        state_filenames = {v["filename"] for v in drive_state.values()}
+        legacy_only = legacy_filenames - state_filenames
+    else:
+        drive_state, legacy_only = {}, set()
+
     ingested, skipped, errors = [], [], []
 
     for drive_file in files:
+        drive_id = drive_file["id"]
         filename = drive_file["name"]
+        drive_modified = _iso_to_unix(drive_file.get("modifiedTime", ""))
+        stale_filename_to_delete: str | None = None
 
-        if skip_existing and filename in existing:
-            skipped.append({"filename": filename, "reason": "already ingested"})
-            continue
+        if skip_existing:
+            entry = drive_state.get(drive_id)
+            if entry is not None:
+                if entry["filename"] != filename:
+                    # RENAME — old chunks must be removed before ingest
+                    stale_filename_to_delete = entry["filename"]
+                    logger.info(
+                        "Drive rename detected (tenant=%s): %r → %r",
+                        tenant_id, entry["filename"], filename,
+                    )
+                elif drive_modified <= entry["ingest_ts"]:
+                    # Up to date — skip
+                    skipped.append({"filename": filename, "reason": "up to date"})
+                    continue
+                # else OVERWRITE — fall through to ingest (_upsert dedups)
+            elif filename in legacy_only:
+                # Legacy chunk (no drive_file_id yet) — skip per old rule,
+                # next re-ingest will backfill drive_file_id
+                skipped.append({"filename": filename, "reason": "legacy, no drive_file_id"})
+                continue
 
         try:
-            file_bytes = download_file(drive_file["id"])
-            drive_link = f"https://drive.google.com/file/d/{drive_file['id']}/view"
+            # RENAME cleanup first so dangling chunks don't linger
+            if stale_filename_to_delete:
+                await asyncio.to_thread(
+                    delete_vectors_by_filename, namespace, stale_filename_to_delete,
+                )
+
+            file_bytes = download_file(drive_id)
+            drive_link = f"https://drive.google.com/file/d/{drive_id}/view"
             chunks = await ingestion_v2.ingest_v2(
                 file_bytes=file_bytes, filename=filename, namespace=namespace,
                 tenant_id=tenant_id, doc_category=doc_category,
-                download_link=drive_link,
+                download_link=drive_link, drive_file_id=drive_id,
             )
             ingested.append({"filename": filename, "chunks": chunks})
             logger.info("Ingested '%s' (%d chunks) for tenant %s", filename, chunks, tenant_id)

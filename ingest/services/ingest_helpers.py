@@ -41,8 +41,15 @@ def _build_metadata(
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
+    drive_file_id: str = "",
 ) -> dict[str, Any]:
-    return {
+    """Chunk metadata stamp.
+
+    ``drive_file_id`` stores the stable Drive file ID so admin delete can
+    remove the file even after a rename — name-based lookup would miss
+    renamed files. Empty string when ingest isn't Drive-backed (unused today).
+    """
+    meta = {
         "tenant_id": tenant_id,
         "source_type": source_type,
         "source_filename": source_filename,
@@ -50,6 +57,9 @@ def _build_metadata(
         "url": url,
         "download_link": download_link,
     }
+    if drive_file_id:
+        meta["drive_file_id"] = drive_file_id
+    return meta
 
 
 # ──────────────────────────────────────
