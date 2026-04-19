@@ -22,14 +22,14 @@ This `CLAUDE.md` lives **inside** the `cutip-rag-chatbot/` git repo — the Pyth
 cutip-rag-chatbot/              ← this repo (git)
 ├── CLAUDE.md                   ← this file
 ├── chat/                       ← LINE webhook + agentic RAG + search
-├── ingest/                     ← document pipeline (v1 prod + v2 pilot)
+├── ingest/                     ← document pipeline (v2 Opus 4.7 universal, v1 removed 2026-04-19)
 │   ├── services/
-│   │   ├── ingestion.py          (v1 — 5 format-specific paths)
-│   │   ├── ingestion_v2.py       (v2 — universal Opus 4.7 pipeline)
+│   │   ├── ingest_helpers.py     (helpers: _build_metadata, _convert_to_pdf, _delete_existing_vectors, _upsert)
+│   │   ├── ingestion_v2.py       (main pipeline — ensure_pdf → extract_hyperlinks → Opus parse+chunk → _upsert)
 │   │   ├── _v2_prompts.py        (v2 system prompt + tool schema)
-│   │   ├── chunking.py, enrichment.py, vision.py  (v1 utilities)
+│   │   ├── vision.py             (only _looks_like_refusal — filters Opus "can't read this" responses)
 │   │   └── gdrive.py
-│   └── routers/ingestion.py      (has both /gdrive and /v2/gdrive endpoints)
+│   └── routers/ingestion.py      (thin-wrapper routes: /document, /spreadsheet, /gdrive, /gdrive/scan, /gdrive/file, /v2/gdrive, /v2/gdrive/file — all call ingest_v2)
 ├── admin/                      ← tenants, users, analytics, privacy, backup
 ├── shared/                     ← config, schemas, middleware, auth, llm factory, firestore, vectorstore
 ├── scripts/                    ← audit + reingest + smoke tools (see below)
@@ -108,7 +108,7 @@ Cloud Run URLs (stable): `https://cutip-{service}-265709916451.asia-southeast1.r
 ### Current deployed revisions (as of 2026-04-19)
 
 - `cutip-chat-api-00023-pf6` — ANTHROPIC_API_KEY rotated to v7
-- `cutip-ingest-worker-00021-gjb` — v2 endpoints (`/v2/gdrive`, `/v2/gdrive/file` with `?namespace_override=*_v2_audit`) + `fonts-thai-tlwg` for LibreOffice Thai rendering (fixes XLSX regression on `ตารางเรียน`) + ANTHROPIC_API_KEY rotated to v7
+- `cutip-ingest-worker-00023-p2g` — **v1 dead code removed + review follow-ups**: all routes thin-wrap `ingest_v2`; `ingestion.py` renamed to `ingest_helpers.py` (helpers only, 195 lines); `vision.py` trimmed 185→32 lines; `enrichment.py` + `chunking.py` deleted; `IngestMarkdownRequest`+`IngestMetadata` schemas removed; `sheets_processed` deprecated to 0; `url: Form("")` restored on /document + /spreadsheet for forward-compat. v1 archived in `legacy` branch. +`fonts-thai-tlwg` + ANTHROPIC_API_KEY v7.
 - `cutip-admin-api-00009-zg9` — ANTHROPIC_API_KEY rotated to v7
 - `cutip-admin-portal-00010-wcg` — pre-demo rebuild: 2 lint fixes (React 19 `set-state-in-effect` rule on `settings/page.tsx`, `catch (err: any)` → `unknown` on `auth-context.tsx`)
 

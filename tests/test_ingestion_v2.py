@@ -27,7 +27,7 @@ def test_ensure_pdf_invokes_libreoffice_for_docx(monkeypatch):
         calls["ext"] = ext
         return b"%PDF-1.4\nconverted\n%%EOF"
 
-    import ingest.services.ingestion as v1_mod
+    import ingest.services.ingest_helpers as v1_mod
     monkeypatch.setattr(v1_mod, "_convert_to_pdf", fake_convert)
 
     out = ingestion_v2.ensure_pdf(b"DOCX-fake-bytes", "form.docx")
@@ -225,12 +225,11 @@ async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
         calls["opus"] = (pdf, links, fn)
         return [Document(page_content="body", metadata={"page": 1, "section_path": "", "has_table": False})]
 
-    async def fake_upsert(chunks, namespace, extra_metadata, full_text="", skip_enrichment=False):
+    async def fake_upsert(chunks, namespace, extra_metadata):
         calls["upsert"] = {
             "chunks_len": len(chunks),
             "namespace": namespace,
             "extra_metadata": extra_metadata,
-            "skip_enrichment": skip_enrichment,
         }
         return len(chunks)
 
@@ -238,7 +237,7 @@ async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
     monkeypatch.setattr(ingestion_v2, "extract_hyperlinks", fake_extract_hyperlinks)
     monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
 
-    import ingest.services.ingestion as v1_mod
+    import ingest.services.ingest_helpers as v1_mod
     monkeypatch.setattr(v1_mod, "_upsert", fake_upsert)
 
     result = await ingestion_v2.ingest_v2(
@@ -255,8 +254,6 @@ async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
     assert calls["extract_hyperlinks"] == b"%PDF-1.4\nnormalized\n%%EOF"
     assert calls["opus"][2] == "form.docx"
     assert calls["upsert"]["namespace"] == "cutip_v2_audit"
-    # v2 MUST always skip v1's _enrich_with_context — Opus already annotated.
-    assert calls["upsert"]["skip_enrichment"] is True
     meta = calls["upsert"]["extra_metadata"]
     assert meta["tenant_id"] == "cutip_01"
     assert meta["source_filename"] == "form.docx"
