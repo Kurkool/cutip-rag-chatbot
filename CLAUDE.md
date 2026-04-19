@@ -105,10 +105,12 @@ git checkout Dockerfile                     # restore chat Dockerfile (chat is t
 
 Cloud Run URLs (stable): `https://cutip-{service}-265709916451.asia-southeast1.run.app` where `{service}` is `chat-api`, `ingest-worker`, `admin-api`, `admin-portal`.
 
-### Current deployed revisions (as of 2026-04-18)
+### Current deployed revisions (as of 2026-04-19)
 
-- `cutip-ingest-worker-00019-7vr` — has v2 endpoints (`/v2/gdrive`, `/v2/gdrive/file` with `?namespace_override=*_v2_audit`)
-- Other services on last revisions from `main` branch.
+- `cutip-chat-api-00022-77x` — last from `main`
+- `cutip-ingest-worker-00020-xts` — v2 endpoints (`/v2/gdrive`, `/v2/gdrive/file` with `?namespace_override=*_v2_audit`) + `fonts-thai-tlwg` for LibreOffice Thai rendering (fixes XLSX regression on `ตารางเรียน`)
+- `cutip-admin-api-00008-mpf` — last from `main`
+- `cutip-admin-portal-00010-wcg` — pre-demo rebuild: 2 lint fixes (React 19 `set-state-in-effect` rule on `settings/page.tsx`, `catch (err: any)` → `unknown` on `auth-context.tsx`)
 
 ## Branch conventions
 
@@ -138,6 +140,10 @@ Cloud Run URLs (stable): `https://cutip-{service}-265709916451.asia-southeast1.r
 11. **Windows Unicode output.** Always `sys.stdout.reconfigure(encoding='utf-8')` at the top of any script that prints Thai, emoji, or arrows — otherwise cp874 crashes with `UnicodeEncodeError`. Existing scripts in `scripts/` follow this.
 12. **cp Dockerfile before deploy** — Cloud Build doesn't take a `--dockerfile` flag. See Deploy.
 13. **`scripts/audit_v2.py` fetches `ANTHROPIC_API_KEY` from Secret Manager**, not `.env`. Other `scripts/` (`full_audit.py`, `ask_anything.py`, `reingest_all.py`) fetch `ADMIN_API_KEY` the same way. Pattern: `subprocess.check_output(['gcloud', 'secrets', 'versions', 'access', 'latest', '--secret=<NAME>'], shell=True).decode().strip()`.
+14. **LibreOffice needs Thai fonts.** `python:3.11-slim + libreoffice-*` with `--no-install-recommends` ships English-only fonts; XLSX/PPTX Thai text renders as □ boxes in the PDF conversion step, Opus 4.7 vision sees boxes and reports "ไม่สามารถถอดความได้" → incomplete chunks (v2 coverage dropped 70%→21% on `ตารางเรียน`). `ingest/Dockerfile` now installs `fonts-thai-tlwg` + runs `fc-cache -f`.
+15. **Firestore composite indexes.** `pending_registrations` needs `status ASC + created_at DESC` (created 2026-04-19 after `/api/registrations` 500'd with `FailedPrecondition: The query requires an index`). Existing `chat_logs`: `tenant_id ASC + created_at DESC` already covered the chat-logs-by-tenant query. Before adding any new endpoint with `.where().order_by()`, check via `gcloud firestore indexes composite list --project=cutip-rag --database='(default)'` and create missing with `gcloud firestore indexes composite create --collection-group=<coll> --field-config=field-path=<F>,order=<ASC|DESC>` (one `--field-config` per field). Index build on empty collection takes a few minutes.
+16. **Cloud Monitoring uptime check resource is immutable.** Cannot change `monitoredResource.labels.host` via `gcloud monitoring uptime update` (no flag) or REST PATCH (400 "Cannot update the resource"). Pattern when a Cloud Run service gets renamed: (1) `gcloud monitoring uptime create` new check for new host, (2) PATCH any alert policies whose `conditionAbsent.filter` references the old host label — filter is keyed by `resource.labels.host`, not check ID, so policies don't auto-follow, (3) `gcloud monitoring uptime delete` the old check.
+17. **Git Bash MSYS mangles `/path` flags in gcloud.** `gcloud ... --path=/health` becomes `--path=/C:/Program Files/Git/health` silently. `MSYS_NO_PATHCONV=1` breaks gcloud itself. Workaround: use REST API `curl -X PATCH` with single-quoted JSON body (`'{"httpCheck":{"path":"/health"}}'`), or double-slash (`//health`).
 
 ## Audit + regression tooling (trust evidence, not aggregate tests)
 
@@ -148,6 +154,9 @@ Aggregate `pytest tests/` passing does **not** mean ingestion is correct for a s
 - `scripts/audit_v2.py` — local driver that ingests `sample-doc/` into `cutip_v2_audit` via direct `ingest_v2()` call (NOT Cloud Run). Useful for quick prompt iteration but **non-PDF formats fail locally** because LibreOffice isn't installed on the dev machine.
 - `scripts/reingest_all.py` — trigger full re-ingest via `/api/tenants/{tenant_id}/ingest/gdrive` (v1 path). For v2 batch: POST to `/api/tenants/{tenant_id}/ingest/v2/gdrive?namespace_override=cutip_v2_audit` with the same body.
 - `scripts/audit_ingestion.py`, `scripts/deep_recheck.py`, `scripts/verify_keu.py`, `scripts/broad_smoke.py`, `scripts/verify_page_format.py`, `scripts/smoke_test.py` — targeted diagnostic scripts.
+- `scripts/compare_v1_v2.py` (2026-04-19) — Pinecone-side side-by-side of `cutip_01` vs `cutip_v2_audit`: chunk counts, avg size, coverage %, entity preservation, hygiene flags, metadata-field presence. Zero API cost (Pinecone list+fetch only).
+- `scripts/diag_xlsx.py` (2026-04-19) — dump v1 + v2 chunks for a single `source_filename` alongside raw Excel cell dump; line-level "missing from v2" heuristic. Used to diagnose the LibreOffice-Thai-font regression.
+- `scripts/reingest_xlsx.py` (2026-04-19) — template for single-file v2 re-ingest trigger (POST `/v2/gdrive/file?namespace_override=cutip_v2_audit`). Generalize by swapping `FILENAME`.
 
 ## Tenant model
 
@@ -162,11 +171,9 @@ Aggregate `pytest tests/` passing does **not** mean ingestion is correct for a s
 3. Read `docs/architecture.md` §11 and `docs/thesis-project-detail.md` §7.6 for v2 context.
 4. Check auto-memory in the harness if available (`memory/MEMORY.md`) — it has machine-independent feedback lessons.
 
-## Known pending state (as of 2026-04-18, commit 4c2a491)
+## Known pending state (as of 2026-04-19)
 
-**⚠️ Task: revert `cutip_01.pinecone_namespace` from `cutip_v2_audit` → `cutip_01`**
-
-A LINE-bot verification test temporarily pointed the production tenant at the v2 audit namespace. If no one reverted it, all LINE + admin-portal traffic is still hitting the 149 v2-audit chunks (14 sample docs) instead of the 106 production v1 chunks. Production data in namespace `cutip_01` is intact, just idle.
+**⚠️ Tenant still on `cutip_v2_audit` — intentionally kept for faculty-staff demo (2026-04-19).** After demo closes, revert `cutip_01.pinecone_namespace` → `cutip_01`. While on v2 audit, all LINE + admin-portal traffic hits the **148 v2-audit chunks (14 sample docs)** — includes the re-ingested `ตารางเรียน.xlsx` with Thai instructor names intact (post-fonts-thai-tlwg fix). Production namespace `cutip_01` (106 chunks) is intact, just idle.
 
 Revert snippet:
 ```python
@@ -179,6 +186,15 @@ db.collection('tenants').document('cutip_01').update({
 })
 ```
 chat-api re-warms BM25 on the next query automatically (logs `BM25 warmed for namespace 'cutip_01': 106 documents`). Smoke-test 1 LINE query after revert to confirm.
+
+**⚠️ Uncommitted local changes — user pushes themselves:**
+- `ingest/Dockerfile` — `+fonts-thai-tlwg`, `+fc-cache -f` (Thai rendering fix — already deployed as `cutip-ingest-worker-00020-xts`)
+- `scripts/compare_v1_v2.py`, `scripts/diag_xlsx.py`, `scripts/reingest_xlsx.py` — new audit/diagnostic scripts (no runtime dependency)
+- `../admin-portal/src/app/settings/page.tsx`, `../admin-portal/src/lib/auth-context.tsx` — 2 lint fixes (already deployed as `cutip-admin-portal-00010-wcg`)
+
+**⚠️ GCP infra state changed 2026-04-19** (no code change, but visible in gcloud console):
+- Uptime check `cu-tip-rag-bot-8nniU0hpQiE` **deleted**; replaced with `cu-tip-chat-api-4SQvqDdGABQ` targeting `cutip-chat-api-...run.app/health`. Alert policy `RAG Bot Down Alert` filter updated to new host. Old check had been failing silently for weeks (targeted old Cloud Run service name `cutip-rag-bot` that had been renamed to `cutip-chat-api`).
+- Firestore composite index created on `pending_registrations`: `status` ASC + `created_at` DESC. Was missing → `/api/registrations` returned 500. Pre-demo fix.
 
 ## Where new docs must go
 
