@@ -139,6 +139,95 @@ def delete_user_vectors(namespace: str, user_id: str) -> int:
     return deleted
 
 
+def get_existing_drive_state(namespace: str) -> dict[str, dict]:
+    """Return ``{drive_file_id: {"filename": str, "ingest_ts": float}}`` for every
+    chunk with ``drive_file_id`` metadata. Multiple chunks of the same file
+    collapse to the latest (highest ingest_ts) entry.
+
+    Used by ``_process_gdrive_folder`` to detect four states per Drive file:
+      * NEW — ``drive_file_id`` not in map → ingest
+      * RENAME — in map, but Drive name != stored filename → delete old vectors + ingest
+      * OVERWRITE — in map, same name, Drive ``modifiedTime`` > ``ingest_ts`` → re-ingest
+      * SKIP — in map, same name, Drive not newer → no-op
+
+    Chunks without ``drive_file_id`` (ingested before 2026-04-20) are ignored
+    here — callers must combine with ``get_unique_filenames`` to cover legacy.
+    """
+    ids = list_all_vector_ids(namespace)
+    state: dict[str, dict] = {}
+    if not ids:
+        return state
+    index = get_raw_index()
+    for i in range(0, len(ids), PINECONE_PAGE_SIZE):
+        batch = ids[i:i + PINECONE_PAGE_SIZE]
+        fetched = index.fetch(ids=batch, namespace=namespace)
+        for vec in fetched.vectors.values():
+            meta = vec.metadata or {}
+            drive_id = meta.get("drive_file_id", "")
+            if not drive_id:
+                continue
+            ts = float(meta.get("ingest_ts", 0) or 0)
+            existing = state.get(drive_id)
+            if existing is None or ts > existing["ingest_ts"]:
+                state[drive_id] = {
+                    "filename": meta.get("source_filename", ""),
+                    "ingest_ts": ts,
+                }
+    return state
+
+
+def get_drive_file_id_for(namespace: str, source_filename: str) -> str | None:
+    """Return the ``drive_file_id`` metadata for the first chunk matching ``source_filename``.
+
+    Used by admin delete to resolve the Drive file ID even when the file was
+    renamed in Drive after ingest — name-based ``find_file_id_by_name`` would
+    miss it. Chunks ingested before the drive_file_id field was added (pre
+    2026-04-20) won't have this metadata; caller should fall back to a
+    name-based lookup in that case.
+    """
+    ids = list_all_vector_ids(namespace)
+    if not ids:
+        return None
+    index = get_raw_index()
+    for i in range(0, len(ids), PINECONE_PAGE_SIZE):
+        batch = ids[i:i + PINECONE_PAGE_SIZE]
+        fetched = index.fetch(ids=batch, namespace=namespace)
+        for vec in fetched.vectors.values():
+            meta = vec.metadata or {}
+            if meta.get("source_filename") == source_filename:
+                drive_file_id = meta.get("drive_file_id", "")
+                if drive_file_id:
+                    return drive_file_id
+    return None
+
+
+def delete_vectors_by_filename(namespace: str, source_filename: str) -> int:
+    """Delete every vector in ``namespace`` whose ``source_filename`` matches.
+
+    Pinecone serverless does not support metadata-filter delete — we list IDs,
+    filter by metadata locally, delete by ID. Used by admin-api's single-file
+    delete endpoint. Returns count deleted (0 if no matches).
+    """
+    ids = list_all_vector_ids(namespace)
+    if not ids:
+        return 0
+
+    index = get_raw_index()
+    deleted = 0
+    for i in range(0, len(ids), PINECONE_PAGE_SIZE):
+        batch = ids[i:i + PINECONE_PAGE_SIZE]
+        fetched = index.fetch(ids=batch, namespace=namespace)
+        matching: list[str] = []
+        for vid, vec in fetched.vectors.items():
+            meta = vec.metadata or {}
+            if meta.get("source_filename") == source_filename:
+                matching.append(vid)
+        if matching:
+            index.delete(ids=matching, namespace=namespace)
+            deleted += len(matching)
+    return deleted
+
+
 def get_document_list(namespace: str) -> list[dict]:
     """Get unique documents with category/type info for a namespace."""
     ids = list_all_vector_ids(namespace)

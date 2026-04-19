@@ -94,6 +94,10 @@ class TenantCreate(BaseModel):
     # Google Drive folder for hourly auto-scan ingest. Empty string = opt-out
     # (the scheduler's /scan-all skips tenants without this set).
     drive_folder_id: str = Field(default="", max_length=200)
+    # Optional display label for the connected Drive folder. Set by the
+    # /gdrive/connect flow so the admin portal can show "Connected: <name>"
+    # instead of the raw folder ID.
+    drive_folder_name: str = Field(default="", max_length=500)
     is_active: bool = True
 
     @field_validator("faculty_name", "persona")
@@ -107,9 +111,10 @@ class TenantUpdate(BaseModel):
     line_destination: str | None = Field(default=None, max_length=100)
     line_channel_access_token: str | None = Field(default=None, max_length=500)
     line_channel_secret: str | None = Field(default=None, max_length=100)
-    pinecone_namespace: str | None = Field(default=None, max_length=64)
+    pinecone_namespace: str | None = Field(default=None, pattern=r"^[a-z0-9_-]+$", max_length=64)
     persona: str | None = Field(default=None, max_length=5000)
     drive_folder_id: str | None = Field(default=None, max_length=200)
+    drive_folder_name: str | None = Field(default=None, max_length=500)
     is_active: bool | None = None
 
     @field_validator("faculty_name", "persona")
@@ -127,9 +132,21 @@ class TenantResponse(BaseModel):
     pinecone_namespace: str
     persona: str
     drive_folder_id: str = ""
+    drive_folder_name: str = ""
     is_active: bool
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class GDriveConnectRequest(BaseModel):
+    """Sent by admin portal after Google Picker flow completes.
+
+    The frontend already handled: OAuth login, Picker selection, and the Drive
+    API `permissions.create` call to add the service account as Editor on the
+    selected folder. This endpoint only persists the outcome to Firestore.
+    """
+    folder_id: str = Field(..., min_length=1, max_length=200)
+    folder_name: str = Field(..., min_length=1, max_length=500)
 
 
 # ──────────────────────────────────────

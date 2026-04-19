@@ -213,6 +213,7 @@ async def ingest_v2(
     doc_category: str = "general",
     url: str = "",
     download_link: str = "",
+    drive_file_id: str = "",
 ) -> int:
     """v2 universal ingestion entrypoint.
 
@@ -224,9 +225,9 @@ async def ingest_v2(
       4. ``_upsert`` (reused from v1) — Cohere embed, Pinecone atomic swap,
          BM25 cross-process invalidation
 
-    v2 always skips v1's ``_enrich_with_context`` — Opus annotates each
-    chunk with section context in the single parse call. There is no
-    caller-facing override for this.
+    ``drive_file_id`` (optional) stores the Drive file ID in chunk metadata
+    so admin delete can remove the Drive file by ID even after rename —
+    name-based lookup breaks when users rename files in Drive after ingest.
     """
     from ingest.services.ingest_helpers import _build_metadata, _upsert
 
@@ -245,5 +246,6 @@ async def ingest_v2(
         doc_category=doc_category,
         url=url,
         download_link=download_link,
+        drive_file_id=drive_file_id,
     )
     return await _upsert(chunks, namespace, metadata)

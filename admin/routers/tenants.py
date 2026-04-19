@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from shared.schemas import TenantCreate, TenantResponse, TenantUpdate
+from shared.schemas import GDriveConnectRequest, TenantCreate, TenantResponse, TenantUpdate
 from shared.services import firestore as firestore_service
 from shared.services.auth import get_accessible_tenant, get_current_user, require_super_admin
 from shared.services.vectorstore import get_raw_index
@@ -51,9 +51,55 @@ async def update_tenant(
     update_data = body.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # If namespace is being changed, bump bm25_invalidate_ts so chat-api
+    # rewarms its BM25 cache from the new namespace on the next query.
+    # Without this, chat keeps serving results from the stale cache until
+    # the container cycles.
+    if (
+        "pinecone_namespace" in update_data
+        and update_data["pinecone_namespace"] != tenant.get("pinecone_namespace")
+    ):
+        import time
+        update_data["bm25_invalidate_ts"] = time.time()
+        logger.info(
+            "Namespace change for %s: %s → %s (bumping bm25_invalidate_ts)",
+            tenant["tenant_id"], tenant.get("pinecone_namespace"),
+            update_data["pinecone_namespace"],
+        )
+
     updated = await firestore_service.update_tenant(tenant["tenant_id"], update_data)
     if not updated:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    return updated
+
+
+@router.post("/{tenant_id}/gdrive/connect", response_model=TenantResponse)
+async def connect_gdrive(
+    body: GDriveConnectRequest,
+    tenant: dict = Depends(get_accessible_tenant),
+):
+    """Save the Drive folder selected via the admin-portal Picker flow.
+
+    The frontend has already (1) obtained the user's OAuth token, (2) shown
+    the Google Picker, (3) called Drive API ``files.permissions.create`` to
+    add the service account as Editor on the selected folder. This endpoint
+    just persists the resulting folder_id + folder_name so the scheduled
+    ``/api/ingest/scan-all`` + manual scans pick up the tenant's Drive.
+    """
+    updated = await firestore_service.update_tenant(
+        tenant["tenant_id"],
+        {
+            "drive_folder_id": body.folder_id,
+            "drive_folder_name": body.folder_name,
+        },
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    logger.info(
+        "GDrive connected for tenant %s: folder_id=%s name=%r",
+        tenant["tenant_id"], body.folder_id, body.folder_name,
+    )
     return updated
 
 
