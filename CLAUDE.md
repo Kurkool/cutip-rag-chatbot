@@ -107,9 +107,9 @@ Cloud Run URLs (stable): `https://cutip-{service}-265709916451.asia-southeast1.r
 
 ### Current deployed revisions (as of 2026-04-19)
 
-- `cutip-chat-api-00022-77x` — last from `main`
-- `cutip-ingest-worker-00020-xts` — v2 endpoints (`/v2/gdrive`, `/v2/gdrive/file` with `?namespace_override=*_v2_audit`) + `fonts-thai-tlwg` for LibreOffice Thai rendering (fixes XLSX regression on `ตารางเรียน`)
-- `cutip-admin-api-00008-mpf` — last from `main`
+- `cutip-chat-api-00023-pf6` — ANTHROPIC_API_KEY rotated to v7
+- `cutip-ingest-worker-00021-gjb` — v2 endpoints (`/v2/gdrive`, `/v2/gdrive/file` with `?namespace_override=*_v2_audit`) + `fonts-thai-tlwg` for LibreOffice Thai rendering (fixes XLSX regression on `ตารางเรียน`) + ANTHROPIC_API_KEY rotated to v7
+- `cutip-admin-api-00009-zg9` — ANTHROPIC_API_KEY rotated to v7
 - `cutip-admin-portal-00010-wcg` — pre-demo rebuild: 2 lint fixes (React 19 `set-state-in-effect` rule on `settings/page.tsx`, `catch (err: any)` → `unknown` on `auth-context.tsx`)
 
 ## Branch conventions
