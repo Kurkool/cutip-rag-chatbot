@@ -65,14 +65,14 @@ def ensure_pdf(file_bytes: bytes, filename: str) -> bytes:
     """Normalize any supported input to PDF bytes.
 
     PDF inputs are passed through untouched (byte-identity preserved).
-    DOCX/XLSX/PPT and their legacy variants are converted via LibreOffice
-    (delegated to v1's battle-tested `_convert_to_pdf`).
+    Other formats (DOC/DOCX/XLS/XLSX/PPT/PPTX/CSV) are converted via LibreOffice
+    (delegated to the battle-tested `_convert_to_pdf` helper).
     """
     ext = os.path.splitext(filename)[1].lower()
     if ext == ".pdf":
         return file_bytes
-    if ext in {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}:
-        from ingest.services.ingestion import _convert_to_pdf
+    if ext in {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv"}:
+        from ingest.services.ingest_helpers import _convert_to_pdf
         return _convert_to_pdf(file_bytes, ext)
     raise ValueError(f"ensure_pdf: unsupported extension '{ext}' for '{filename}'")
 
@@ -228,7 +228,7 @@ async def ingest_v2(
     chunk with section context in the single parse call. There is no
     caller-facing override for this.
     """
-    from ingest.services.ingestion import _build_metadata, _upsert
+    from ingest.services.ingest_helpers import _build_metadata, _upsert
 
     pdf_bytes = ensure_pdf(file_bytes, filename)
     hyperlinks = extract_hyperlinks(pdf_bytes)
@@ -246,8 +246,4 @@ async def ingest_v2(
         url=url,
         download_link=download_link,
     )
-    return await _upsert(
-        chunks, namespace, metadata,
-        full_text="",              # v2 never needs v1-style re-enrichment
-        skip_enrichment=True,      # explicit, not just relying on default
-    )
+    return await _upsert(chunks, namespace, metadata)

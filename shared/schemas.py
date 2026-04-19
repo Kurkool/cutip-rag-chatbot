@@ -136,42 +136,17 @@ class TenantResponse(BaseModel):
 # Ingestion
 # ──────────────────────────────────────
 
-ALLOWED_DOC_CATEGORIES = {"general", "form", "curriculum", "schedule", "announcement", "regulation"}
-
-
-class IngestMetadata(BaseModel):
-    doc_category: str = Field(default="general", max_length=50)
-    url: str = Field(default="", max_length=2000)
-    download_link: str = Field(default="", max_length=2000)
-
-    @field_validator("doc_category")
-    @classmethod
-    def validate_category(cls, v: str) -> str:
-        v = v.strip().lower()
-        if v not in ALLOWED_DOC_CATEGORIES:
-            return "general"
-        return v
-
-
 class IngestResponse(BaseModel):
     message: str
     chunks_processed: int
 
 
-class IngestMarkdownRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=500_000)  # ~500KB text
-    title: str = Field(default="", max_length=500)
-    metadata: IngestMetadata = IngestMetadata()
-
-    @field_validator("content")
-    @classmethod
-    def sanitize_content(cls, v: str) -> str:
-        return _strip_dangerous_html(v)
-
-
 class IngestSpreadsheetResponse(BaseModel):
     message: str
-    sheets_processed: int
+    # Deprecated 2026-04-19 after v2 cutover: v2 pipeline routes XLSX through
+    # LibreOffice→PDF→Opus so individual sheet boundaries are lost. Always 0.
+    # Kept for admin-portal backwards compat; will be removed in a future schema version.
+    sheets_processed: int = 0
     chunks_processed: int
 
 

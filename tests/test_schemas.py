@@ -7,8 +7,6 @@ from shared.schemas import (
     AdminUserCreate,
     AdminUserUpdate,
     ChatRequest,
-    IngestMarkdownRequest,
-    IngestMetadata,
     InitAdminRequest,
     TenantCreate,
     TenantUpdate,
@@ -85,14 +83,6 @@ class TestSanitization:
         )
         assert "<b>" not in u.display_name
 
-    def test_sanitize_markdown_content(self):
-        req = IngestMarkdownRequest(
-            content='# Title\n<script>bad()</script>\nContent',
-        )
-        assert "<script>" not in req.content
-        assert "# Title" in req.content
-
-
 # ──────────────────────────────────────
 # Field validation
 # ──────────────────────────────────────
@@ -152,22 +142,6 @@ class TestFieldValidation:
                 email="a@b.com", password="x" * 129,
                 display_name="Name",
             )
-
-    def test_markdown_content_required(self):
-        with pytest.raises(ValidationError):
-            IngestMarkdownRequest(content="")
-
-    def test_doc_category_validation(self):
-        m = IngestMetadata(doc_category="curriculum")
-        assert m.doc_category == "curriculum"
-
-    def test_doc_category_invalid_defaults_general(self):
-        m = IngestMetadata(doc_category="invalid_category")
-        assert m.doc_category == "general"
-
-    def test_url_max_length(self):
-        with pytest.raises(ValidationError):
-            IngestMetadata(url="x" * 2001)
 
     def test_faculty_name_max_length(self):
         with pytest.raises(ValidationError):
