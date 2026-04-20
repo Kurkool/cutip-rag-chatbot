@@ -1,0 +1,17 @@
+<svg width="200" height="212" viewBox="0 0 168 178" xmlns="http://www.w3.org/2000/svg">
+  <title>VIRIYA — Icon Mark</title>
+  <desc>VIRIYA icon mark only — transparent background, suitable for favicon, app icon, watermark</desc>
+
+  <!-- V mark — left arm -->
+  <polygon points="0,0 34,0 84,178 50,178" fill="#26215C"/>
+  <!-- V mark — right arm -->
+  <polygon points="168,0 134,0 84,178 118,178" fill="#26215C"/>
+
+  <!-- Flame outer (amber) -->
+  <polygon points="84,50 77,143 91,143" fill="#EF9F27"/>
+  <!-- Flame inner highlight -->
+  <polygon points="84,73 81,126 87,126" fill="#FAC775"/>
+  <!-- Apex glow -->
+  <circle cx="84" cy="43" r="7" fill="#FAC775"/>
+  <circle cx="84" cy="43" r="3.5" fill="white"/>
+</svg>

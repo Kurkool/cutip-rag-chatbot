@@ -1,0 +1,36 @@
+<svg width="520" height="80" viewBox="0 0 520 80" xmlns="http://www.w3.org/2000/svg">
+  <title>VIRIYA — Horizontal Lockup</title>
+  <desc>VIRIYA horizontal lockup — icon mark alongside wordmark and Thai name, for horizontal use in headers, nav bars, LINE OA</desc>
+
+  <!-- Icon mark (scaled to 60px tall, proportional width ~56px) -->
+  <g transform="translate(0, 10) scale(0.337)">
+    <polygon points="0,0 34,0 84,178 50,178" fill="#26215C"/>
+    <polygon points="168,0 134,0 84,178 118,178" fill="#26215C"/>
+    <polygon points="84,50 77,143 91,143" fill="#EF9F27"/>
+    <polygon points="84,73 81,126 87,126" fill="#FAC775"/>
+    <circle cx="84" cy="43" r="7" fill="#FAC775"/>
+    <circle cx="84" cy="43" r="3.5" fill="white"/>
+  </g>
+
+  <!-- Vertical separator -->
+  <line x1="72" y1="14" x2="72" y2="66" stroke="#D3D1C7" stroke-width="0.75"/>
+
+  <!-- Wordmark -->
+  <text x="90" y="36"
+    font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+    font-size="28" font-weight="500"
+    fill="#26215C" letter-spacing="9">VIRIYA</text>
+
+  <!-- Thai name -->
+  <text x="91" y="58"
+    font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+    font-size="13" font-weight="400"
+    fill="#7F77DD" letter-spacing="3">วิริยะ</text>
+
+  <!-- Tagline (small, right-aligned end) -->
+  <text x="510" y="58"
+    font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+    font-size="11" font-weight="400"
+    fill="#888780" letter-spacing="0.3"
+    text-anchor="end">Relentlessly Relevant.</text>
+</svg>
