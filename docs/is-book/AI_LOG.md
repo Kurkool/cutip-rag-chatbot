@@ -13,6 +13,25 @@ Format:
 
 ---
 
+## 2026-04-21 (session 3 — draft ch4.1)
+- Task: analyze, draft
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch04-results.md` (new — §4.1 only, ~12K chars, 8-10 pages)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch03-methodology.md` (fix — program name correction)
+- Data sources used:
+  - 8 transcripts ใน `IS-related/IS-Data/indepth-interview/transcript/*.txt` (read: CUTIP partial, HSM_ผู้ช่วย, HSM_จิ๋ว parts 1-2, สิ่งแวดล้อม_แหวน, จีน partial, เอ๋, ปุ้ย parts 1-2)
+  - Question set docx ในโฟลเดอร์ `question-set/`
+- Quotes extracted: ~25 direct quotes พร้อม file+line references (R3+R5 compliant)
+- Anonymization: S-01..S-04 (staff), ST-01..ST-03 (student)
+- Notes / decisions:
+  - Confirmed staff breakdown: 1 TIP (ธารา) + 2 HSM (ศิมาพร, วรัญญา) + 1 วิทยาศาสตร์สิ่งแวดล้อม (แหวน) ← user confirmed program name
+  - Program full names: HSM = "สหสาขาวิชาการจัดการสารอันตรายและสิ่งแวดล้อม", พี่แหวน = "สหสาขาวิชาวิทยาศาสตร์สิ่งแวดล้อม"
+  - Students ทั้ง 3 ท่านจากหลักสูตร TIP (จากข้อมูล survey + transcripts)
+  - ไม่มี [TBD:] ใน §4.1 — data หนาแน่น (อาจเพิ่ม [TBD:] ถ้า user ตรวจพบจุดคลาดเคลื่อน)
+  - §4.1 อ้างถึง §4.2 (development) และ §4.3 (evaluation) — ยังไม่เขียน
+
+---
+
 ## 2026-04-21 (session 2 — draft ch3)
 - Task: draft, lit search
 - Files touched:
