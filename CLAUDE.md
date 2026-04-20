@@ -1,16 +1,16 @@
-# TIP-RAG — Claude Code Project Guide
+# VIRIYA (วิริยะ) — Claude Code Project Guide
 
-**Project:** CU TIP (Technopreneurship & Innovation Management) RAG Chatbot SaaS — multi-tenant agentic RAG platform for Thai university faculties.
+**Product:** VIRIYA — *Relentlessly Relevant.* (formerly "CU TIP RAG Chatbot"). Multi-tenant agentic RAG platform for Thai university faculties.
 **Owner:** Kurkool Ussawadisayangkool (CU-TIP master's thesis, 6780016820).
-**Status:** Production v4.2.0 on `main`; v2 universal-ingestion pilot on branch `development-integration`.
+**Status:** Production v5.0.0 on `master` — v2 universal ingestion is sole path (post-2026-04-19 cutover); v2.1 hardening complete (2026-04-19); VIRIYA rebrand complete (2026-04-20). v1 code preserved on `legacy` branch for thesis reference only.
 **GCP Project:** `cutip-rag` · **Region:** `asia-southeast1` · **Firestore DB:** `(default)` · **Pinecone Index:** `university-rag` (1536d, cosine).
 
 ## Read first (long-form context)
 
-- [`docs/architecture.md`](docs/architecture.md) — 11 sections, 8 Mermaid diagrams. v1 production + §11 v2 pilot.
-- [`docs/thesis-project-detail.md`](docs/thesis-project-detail.md) — 24 sections, thesis-grade detail. v2 evolution narrative is §7.6.
+- [`docs/architecture.md`](docs/architecture.md) — **13 sections** (post-revision 2026-04-20 for IS submission). §4 primary v2 pipeline; §11 evolution v1→v2→v2.1; §12 file lifecycle semantics (drive_file_id rename-safe, delete order); §13 Drive Connect flow.
+- [`docs/thesis-project-detail.md`](docs/thesis-project-detail.md) — 24 sections, thesis-grade detail (post-revision 2026-04-20). §§7.1–7.5 marked historical; §7.6 expanded v2 evolution narrative; **§7.7 NEW** — v2.1 post-demo hardening (9 subsections).
 - [`docs/superpowers/specs/2026-04-18-ingest-v2-design.md`](docs/superpowers/specs/2026-04-18-ingest-v2-design.md) — v2 spec.
-- [`docs/superpowers/plans/2026-04-18-ingest-v2.md`](docs/superpowers/plans/2026-04-18-ingest-v2.md) — 13-task TDD plan (all 12 code tasks done; Phase-1 audit evidence recorded).
+- [`docs/superpowers/plans/2026-04-18-ingest-v2.md`](docs/superpowers/plans/2026-04-18-ingest-v2.md) — 13-task TDD plan (complete).
 
 ## Repo layout
 
@@ -33,7 +33,7 @@ cutip-rag-chatbot/              ← this repo (git)
 ├── admin/                      ← tenants, users, analytics, privacy, backup
 ├── shared/                     ← config, schemas, middleware, auth, llm factory, firestore, vectorstore
 ├── scripts/                    ← audit + reingest + smoke tools (see below)
-├── tests/                      ← 250 backend tests (pytest, asyncio auto)
+├── tests/                      ← 237 backend tests (pytest, asyncio auto) — frontend has 29 Vitest; total 266
 ├── Dockerfile                  ← chat-api default; see Deploy for swap pattern
 ├── {chat,ingest,admin}/Dockerfile
 ├── pytest.ini
@@ -105,17 +105,17 @@ git checkout Dockerfile                     # restore chat Dockerfile (chat is t
 
 Cloud Run URLs (stable): `https://cutip-{service}-265709916451.asia-southeast1.run.app` where `{service}` is `chat-api`, `ingest-worker`, `admin-api`, `admin-portal`.
 
-### Current deployed revisions (as of 2026-04-19)
+### Current deployed revisions (as of 2026-04-20)
 
-- `cutip-chat-api-00024-gcr` — **rewriter bias fixed**: short-circuit Haiku on queries without follow-up markers (prevents empirically-observed 'ดาวน์โหลด/ฟอร์ม/เกณฑ์' qualifier injection on simple Thai noun queries — caused demo zero_results on `ตารางเรียน`, `ประกาศ`, `สอบวิทยานิพนธ์`); tighter `_REWRITE_PROMPT`; ANTHROPIC_API_KEY v7
-- `cutip-ingest-worker-00023-p2g` — **v1 dead code removed + review follow-ups**: all routes thin-wrap `ingest_v2`; `ingestion.py` renamed to `ingest_helpers.py` (helpers only, 195 lines); `vision.py` trimmed 185→32 lines; `enrichment.py` + `chunking.py` deleted; `IngestMarkdownRequest`+`IngestMetadata` schemas removed; `sheets_processed` deprecated to 0; `url: Form("")` restored on /document + /spreadsheet for forward-compat. v1 archived in `legacy` branch. +`fonts-thai-tlwg` + ANTHROPIC_API_KEY v7.
-- `cutip-admin-api-00009-zg9` — ANTHROPIC_API_KEY rotated to v7
-- `cutip-admin-portal-00010-wcg` — pre-demo rebuild: 2 lint fixes (React 19 `set-state-in-effect` rule on `settings/page.tsx`, `catch (err: any)` → `unknown` on `auth-context.tsx`)
+- `cutip-chat-api-00024-gcr` — **rewriter bias fixed**: short-circuit Haiku on queries without follow-up markers (prevents empirically-observed 'ดาวน์โหลด/ฟอร์ม/เกณฑ์' qualifier injection on simple Thai noun queries); tighter `_REWRITE_PROMPT`; ANTHROPIC_API_KEY v7
+- `cutip-ingest-worker-00027-wgm` — **scan-all NEW/RENAME/OVERWRITE/SKIP** via `drive_file_id` + `modifiedTime`. RENAME → delete old-name vectors + re-ingest; OVERWRITE (Drive newer than ingest_ts) → re-ingest; SKIP → up to date. Legacy chunks without `drive_file_id` fall back to filename skip. All ingest paths import from `shared.services.gdrive` (unified patch surface). +v2 cutover (ingest_helpers.py 215 lines, vision.py 35 lines, `chunking.py` + `enrichment.py` deleted; v1 archived on `legacy`). +`fonts-thai-tlwg`.
+- `cutip-admin-api-00015-dsl` — **`gdrive.delete_file` retries 3× with exp backoff** on transient (5xx, 429, rateLimitExceeded). Pinecone-first delete order preserved. + atomic single-file delete + editable Pinecone namespace + Drive Connect endpoint + Stage Upload endpoint.
+- `cutip-admin-portal-00019-b7s` — **VIRIYA (วิริยะ) logo added**: icon-mark SVG in sidebar (h-7 w-7), login page (h-8 w-8 in h-14 container), register page (same pattern). Logo files at `public/logo/viriya-{icon-mark,logo-horizontal,logo-primary}.svg`. + prior deploys: rebrand "CU TIP RAG" → "VIRIYA" in metadata/titles, Connect Drive button, Stage Upload, trash icon per row, editable Pinecone namespace. Note: revs 00016/00017 had Cloud Build race → overwrote full-brand with partial; 00018+ cleared.
 
 ## Branch conventions
 
-- `main` — production. Only commits that have been validated + user explicitly authorizes.
-- `development-integration` — v2 pilot work (v2 ingestion + audit + docs updates). Current branch in this workspace.
+- `master` — production. Docs revised for IS submission live here (architecture.md 733 lines / 13 sections; thesis-project-detail.md 1696 lines / added §7.7).
+- `legacy` — v1 reference branch (pre-cutover snapshot, thesis reference only, don't merge forward).
 - **User commits themselves** — you can stage + commit when task is complete, but **user pushes to remote**.
 
 ## Testing conventions
@@ -160,20 +160,28 @@ Aggregate `pytest tests/` passing does **not** mean ingestion is correct for a s
 
 ## Tenant model
 
-- One tenant per faculty. Schema in `shared/schemas.py::Tenant*`. Fields: `tenant_id`, `pinecone_namespace` (pattern `^[a-z0-9_-]+$`), `faculty_name`, `line_channel_access_token`, `line_channel_secret`, `line_destination`, `persona`, `drive_folder_id`, `bm25_invalidate_ts`, `is_active`.
+- One tenant per faculty. Schema in `shared/schemas.py::Tenant*`. Fields: `tenant_id`, `pinecone_namespace` (pattern `^[a-z0-9_-]+$`, editable in portal), `faculty_name`, `line_channel_access_token`, `line_channel_secret`, `line_destination`, `persona`, `drive_folder_id` (set via Drive Connect flow), `drive_folder_name` (display), `bm25_invalidate_ts` (cross-process BM25 invalidation), `is_active`.
 - **Only `cutip_01` exists in Firestore.** There is no `cutip_v2_audit` tenant — v2 audit writes to the namespace directly via `namespace_override` query param (suffix-validated to `_v2_audit` to prevent arbitrary namespace writes).
-- To test v2 via LINE: swap `cutip_01.pinecone_namespace` temporarily (affects all LINE users during the swap) + bump `bm25_invalidate_ts`. chat-api re-warms BM25 on next query. Revert after testing. Current LINE-test state: **revert pending** (task-tracker memory) if namespace is still `cutip_v2_audit`.
+- To swap namespace: update `cutip_01.pinecone_namespace` in portal (field is editable post-v2.1) — auto-bumps `bm25_invalidate_ts`. chat-api re-warms BM25 on next query.
+
+## File lifecycle (post-v2.1, read architecture.md §12 for full detail)
+
+- Every chunk has `drive_file_id` in metadata (rename-safe). `source_filename` is still the human-readable key but can mutate.
+- Smart Scan (`POST /api/tenants/{id}/ingest/gdrive/scan`) is a state machine: NEW / RENAME / OVERWRITE / SKIP.
+- Delete order: Pinecone first, Drive second (3× exp backoff). Reverse order produces orphan chunks ("ghost answers") — do not flip.
+- Stage Upload = local file → admin-api uploads to tenant's Drive folder via SA → `ingest_v2(webViewLink)`. Unifies data model; every Pinecone chunk ↔ a Drive file.
+- `shared/services/gdrive.py` is the canonical Drive API module (used by both admin-api delete and ingest). `ingest/services/gdrive.py` is a compat shim — don't add logic there, and test patches should target `shared.services.gdrive`.
 
 ## When you pick this project up on another machine
 
-1. Run `git status` and `git log --oneline -10` — see which branch and where things stand.
-2. Check tenant state: `python -c "from google.cloud import firestore; db=firestore.Client(project='cutip-rag'); print(db.collection('tenants').document('cutip_01').get().to_dict()['pinecone_namespace'])"`. **If it says `cutip_v2_audit`, a swap is still in effect — revert before production changes.** See §"Known pending state" below.
-3. Read `docs/architecture.md` §11 and `docs/thesis-project-detail.md` §7.6 for v2 context.
-4. Check auto-memory in the harness if available (`memory/MEMORY.md`) — it has machine-independent feedback lessons.
+1. Run `git status` and `git log --oneline -10` — you should be on `master`, up to date with origin.
+2. Check tenant state: `python -c "from google.cloud import firestore; db=firestore.Client(project='cutip-rag'); print(db.collection('tenants').document('cutip_01').get().to_dict()['pinecone_namespace'])"`. **If it says `cutip_v2_audit`, the post-demo swap is still in effect — revert before production writes** (see "Known pending state" below).
+3. Read `docs/architecture.md` §§4, 11–13 and `docs/thesis-project-detail.md` §§7.6, 7.7 for v2 + v2.1 context.
+4. Check auto-memory in the harness (`memory/MEMORY.md`) — has machine-independent feedback lessons.
 
-## Known pending state (as of 2026-04-19)
+## Known pending state (as of 2026-04-20)
 
-**⚠️ Tenant still on `cutip_v2_audit` — intentionally kept for faculty-staff demo (2026-04-19).** After demo closes, revert `cutip_01.pinecone_namespace` → `cutip_01`. While on v2 audit, all LINE + admin-portal traffic hits the **148 v2-audit chunks (14 sample docs)** — includes the re-ingested `ตารางเรียน.xlsx` with Thai instructor names intact (post-fonts-thai-tlwg fix). Production namespace `cutip_01` (106 chunks) is intact, just idle.
+**⚠️ Tenant namespace revert pending.** During the 2026-04-19 faculty-staff demo, `cutip_01.pinecone_namespace` was temporarily swapped to `cutip_v2_audit` to showcase v2 quality. After the demo window closed the revert was not yet confirmed. Check current state before shipping new production changes. Target: `cutip_01.pinecone_namespace = cutip_01`, production namespace has 106 chunks and is idle-but-intact.
 
 Revert snippet:
 ```python
