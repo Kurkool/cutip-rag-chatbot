@@ -1,0 +1,85 @@
+TY  - JOUR
+ID  - 1
+AU  - Lewis, Patrick
+AU  - Perez, Ethan
+AU  - Piktus, Aleksandra
+AU  - Petroni, Fabio
+AU  - Karpukhin, Vladimir
+AU  - Goyal, Naman
+AU  - Küttler, Heinrich
+AU  - Lewis, Mike
+AU  - Yih, Wen-tau
+AU  - Rocktäschel, Tim
+AU  - Riedel, Sebastian
+AU  - Kiela, Douwe
+PY  - 2020
+TI  - Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks
+T2  - Advances in Neural Information Processing Systems
+JF  - Advances in Neural Information Processing Systems
+JO  - Advances in Neural Information Processing Systems
+VL  - 33
+SP  - 9459
+EP  - 9474
+PB  - Curran Associates, Inc.
+UR  - https://proceedings.neurips.cc/paper/2020/hash/6b493230205f780e1bc26945df7481e5-Abstract.html
+ER  -
+
+TY  - JOUR
+ID  - 2
+AU  - Davis, Fred D.
+PY  - 1989
+TI  - Perceived Usefulness, Perceived Ease of Use, and User Acceptance of Information Technology
+T2  - MIS Quarterly
+JF  - MIS Quarterly
+JO  - MIS Quarterly
+VL  - 13
+IS  - 3
+SP  - 319
+EP  - 340
+DO  - 10.2307/249008
+PB  - Management Information Systems Research Center, University of Minnesota
+ER  -
+
+TY  - CHAP
+ID  - 3
+AU  - Bezemer, Cor-Paul
+AU  - Zaidman, Andy
+PY  - 2010
+TI  - Multi-tenant SaaS applications: maintenance dream or nightmare?
+BT  - Proceedings of the Joint ERCIM Workshop on Software Evolution (EVOL) and International Workshop on Principles of Software Evolution (IWPSE)
+T2  - Proceedings of the Joint ERCIM Workshop on Software Evolution (EVOL) and International Workshop on Principles of Software Evolution (IWPSE)
+SP  - 88
+EP  - 92
+CY  - New York, NY, USA
+PB  - ACM
+UR  - https://azaidman.github.io/publications/bezemer_evol2010.pdf
+ER  -
+
+TY  - BOOK
+ID  - 4
+AU  - Creswell, John W.
+AU  - Plano Clark, Vicki L.
+PY  - 2018
+TI  - Designing and Conducting Mixed Methods Research
+ET  - 3rd
+PB  - SAGE Publications
+CY  - Thousand Oaks, CA
+SN  - 9781483344379
+ER  -
+
+TY  - JOUR
+ID  - 5
+AU  - Braun, Virginia
+AU  - Clarke, Victoria
+PY  - 2006
+TI  - Using thematic analysis in psychology
+T2  - Qualitative Research in Psychology
+JF  - Qualitative Research in Psychology
+JO  - Qualitative Research in Psychology
+VL  - 3
+IS  - 2
+SP  - 77
+EP  - 101
+DO  - 10.1191/1478088706qp063oa
+PB  - Taylor & Francis
+ER  -

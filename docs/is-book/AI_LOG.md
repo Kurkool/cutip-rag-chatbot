@@ -13,7 +13,29 @@ Format:
 
 ---
 
-## 2026-04-21
+## 2026-04-21 (session 2 — draft ch3)
+- Task: draft, lit search
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/verified-refs.ris` (new — canonical refs file, 5 entries so far)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch03-methodology.md` (new — full draft ~4500 words, 10-12 pages)
+- References verified (in addition to 3 from session 1):
+  - Creswell, J. W., & Plano Clark, V. L. (2018). Designing and Conducting Mixed Methods Research (3rd ed.). SAGE Publications. — verified via SAGE + multiple citing sources
+  - Braun, V., & Clarke, V. (2006). Using thematic analysis in psychology. Qualitative Research in Psychology, 3(2), 77-101. DOI 10.1191/1478088706qp063oa — verified via Taylor & Francis + Scholar
+- Placeholders remaining in ch3:
+  - `[TBD: ระบุช่องทาง Zoom/in-person]` สำหรับวิธีสัมภาษณ์ Phase 1
+  - `[TBD: ระบุช่วงเวลา 30-60 นาที]` สำหรับระยะเวลาสัมภาษณ์
+  - `[TBD: N=1 หรือ 3]` × 2 จุดสำหรับจำนวนผู้ประเมิน chatbot/portal
+  - `[FIGURE 3.1]` 3-phase process diagram
+  - `[FIGURE 3.2]` system architecture
+- Notes / decisions:
+  - Voice calibrated จากตัวอย่างพี่อู๋ — ใช้ "ผู้วิจัย", ศัพท์ไทย+(English), heading ลึก 4 ชั้น
+  - Self-review รอบแรกพบ fabricated specifics ("3 เดือน experience", "6 เดือน history", "45-90 นาที"): แก้เป็น `[TBD:]` หรือ soften language (R1 compliance)
+  - v1 architecture ไม่ใช่ rule-based (เดิมเคยเรียกผิด) — แก้เป็น "Static Pipeline" ที่แยก logic per doc type
+  - ใช้ temp cite `{Author, Year #N}` ทั้งหมด 4 จุด (Creswell×1, Braun×2, Davis×1)
+
+---
+
+## 2026-04-21 (session 1 — setup)
 - Task: outline, setup workspace, toolchain verification (docx + EndNote)
 - Files touched:
   - `cutip-rag-chatbot/docs/is-book/CLAUDE.md` (new — copy จาก `C:\Users\USER\Downloads\CLAUDE.md`)
