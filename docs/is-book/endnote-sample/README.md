@@ -11,9 +11,21 @@
 
 ## วิธีทดสอบ (ทำตามลำดับ)
 
+### 0. (ครั้งแรกเท่านั้น) สร้าง EndNote library
+
+ถ้ายังไม่มี library (ไฟล์ `.enl`) ต้องสร้างก่อน — EndNote จะ import ไม่ได้ถ้าไม่มี library เปิดอยู่
+
+1. เปิด EndNote desktop
+2. `File` → `New...` (Ctrl+N)
+3. ตั้งชื่อ เช่น `VIRIYA-IS.enl`
+4. เลือก save ที่ `C:\Users\USER\PycharmProjects\TIP-RAG\IS-related\endnote-library\` (mkdir ก่อนถ้ายังไม่มี) — จะได้ไฟล์ `VIRIYA-IS.enl` + โฟลเดอร์ `VIRIYA-IS.Data`
+5. คลิก `Save` → library ว่างเปิดขึ้น
+
+*(ครั้งต่อไปเปิด EndNote แล้วไปที่ `File > Open Library...` แล้วเลือก `.enl` เดิม)*
+
 ### 1. Import references เข้า EndNote library
 
-1. เปิด EndNote desktop app
+1. library ต้องเปิดอยู่ (จากข้อ 0)
 2. `File` → `Import` → `File...`
 3. เลือก `verified-refs-sample.ris`
 4. Import Option: **Reference Manager (RIS)**
@@ -47,6 +59,24 @@
 - RecNum ไม่ตรง → ส่ง screenshot EndNote library, ผมจะ update RecNum ใน `.ris`
 - `{...}` ไม่ถูกแทนที่ → อาจต้องเปลี่ยน syntax / ลองใช้ "Insert Citation" แบบ manual แทน
 - Thai authors ใน future refs ตัวอักษรเพี้ยน → ปรับ encoding หรือ fallback `.enw`
+
+## Re-test หลัง update RIS v2 (2026-04-21)
+
+ถ้าเคยทดสอบ v1 แล้ว bibliography ไม่สมบูรณ์ (Bezemer ขาด pp./publisher, Lewis ขาด vol./pages) — v2 เปลี่ยน reference type:
+- Lewis: `CONF` → `JOUR` (treat NeurIPS as journal → vol+pages render)
+- Bezemer: `CONF` → `CHAP` + `BT` field (book chapter → "In Title (pp. X-Y). Publisher.")
+
+**ขั้นตอน retest:**
+
+1. **EndNote library**: ลบ 3 entries เก่า (select all → Delete)
+2. **Re-import** `verified-refs-sample.ris` (v2) — ทำซ้ำ step 1 ข้างบน
+3. **ตรวจ RecNum** ใหม่ต้องได้ 1, 2, 3 เหมือนเดิม
+4. **เปิด sample-manuscript.docx ใหม่** (ผม regenerate fresh temp citations ให้แล้ว)
+5. EndNote tab → **Update Citations and Bibliography**
+6. ตรวจ bibliography ใหม่:
+   - Bezemer → ต้องมี `...IWPSE (pp. 88-92). ACM.`
+   - Lewis → ต้องมี `...Advances in Neural Information Processing Systems, 33, 9459-9474.`
+   - Davis → เหมือนเดิม
 
 ## Fallback ถ้า EndNote workflow ใช้ไม่ได้
 
