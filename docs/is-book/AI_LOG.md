@@ -34,5 +34,5 @@ Format:
   - Manuscript อยู่ใน git repo (`cutip-rag-chatbot/docs/is-book/`)
   - Output pipeline: `python-docx` (ไม่ใช่ pandoc — pandoc ไม่ติดตั้ง, python-docx ควบคุม Thai rendering ได้ละเอียดกว่า)
   - docx test ผ่าน: TH Sarabun New 16pt + th-TH lang tag + Chula margins (L 1.5", RTB 1")
-  - Citation workflow: EndNote temp cite `{Author, Year #RecNum}` + `.ris` import — รอ user test sample-manuscript.docx + POC ก่อนลงแรง
+  - Citation workflow: EndNote temp cite `{Author, Year #RecNum}` + `.ris` import — **VALIDATED** end-to-end 2026-04-21 (v2 RIS fix: Lewis=JOUR, Bezemer=CHAP+BT → APA 7 render ครบทุก field)
   - Figures: mix plan — ผม gen Mermaid/matplotlib, user capture screenshots + business canvas, markers `[FIGURE X.Y]`/`[USER-FIGURE X.Y]`/`[TBD:]`/`[USER-VERIFY:]`
