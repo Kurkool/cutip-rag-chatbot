@@ -390,3 +390,65 @@ def test_format_ocr_sidecar_populated_renders_per_page_sections():
 def test_user_prompt_template_has_ocr_block_placeholder():
     from ingest.services._v2_prompts import USER_PROMPT_TEMPLATE
     assert "{ocr_block}" in USER_PROMPT_TEMPLATE
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_injects_ocr_sidecar(monkeypatch, pure_scan_pdf_bytes):
+    """When ocr_sidecar is provided, the user message must contain the formatted OCR block."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    captured: dict = {}
+
+    fake_llm = MagicMock()
+
+    async def fake_ainvoke(messages):
+        # Capture the human message content for assertion.
+        human = messages[1]
+        captured["content"] = human.content
+        return MagicMock(tool_calls=[{"args": {"chunks": []}}])
+
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
+
+    ingestion_v2._get_opus_llm.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=pure_scan_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        ocr_sidecar={1: "hello from page 1", 2: "hello from page 2"},
+    )
+
+    # Find the text content block in the human message.
+    text_blocks = [b["text"] for b in captured["content"] if b.get("type") == "text"]
+    assert any("hello from page 1" in t for t in text_blocks)
+    assert any("### Page 1" in t for t in text_blocks)
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_without_ocr_sidecar_uses_placeholder(monkeypatch, pure_scan_pdf_bytes):
+    from unittest.mock import AsyncMock, MagicMock
+
+    captured: dict = {}
+    fake_llm = MagicMock()
+
+    async def fake_ainvoke(messages):
+        captured["content"] = messages[1].content
+        return MagicMock(tool_calls=[{"args": {"chunks": []}}])
+
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
+
+    ingestion_v2._get_opus_llm.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=pure_scan_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        ocr_sidecar=None,
+    )
+
+    text_blocks = [b["text"] for b in captured["content"] if b.get("type") == "text"]
+    assert any("no OCR sidecar" in t for t in text_blocks)

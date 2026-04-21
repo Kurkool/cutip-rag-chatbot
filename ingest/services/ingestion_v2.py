@@ -21,6 +21,7 @@ from ingest.services._v2_prompts import (
     SYSTEM_PROMPT,
     USER_PROMPT_TEMPLATE,
     format_sidecar,
+    format_ocr_sidecar,  # NEW
 )
 from ingest.services.vision import _looks_like_refusal
 
@@ -240,6 +241,7 @@ async def opus_parse_and_chunk(
     pdf_bytes: bytes,
     hyperlinks: list[dict],
     filename: str,
+    ocr_sidecar: dict[int, str] | None = None,
 ) -> list[Document]:
     """Send PDF + sidecar to Opus 4.7 with auto tool use, return chunks.
 
@@ -254,6 +256,11 @@ async def opus_parse_and_chunk(
       Opus silently returned empty chunk arrays on long/dense docs
       (45-page slide decks, 20+ student announcement records).
 
+    When ``ocr_sidecar`` is provided (pure-scan path), per-page OCR text is
+    injected into the user prompt via ``{ocr_block}`` alongside the hyperlink
+    sidecar. The PDF document block is still sent so Opus can cross-check
+    vision against OCR.
+
     Returns a list of LangChain ``Document`` objects with metadata
     ``{page, section_path, has_table}``. Higher-level ``_upsert`` layers
     on ``source_filename``, ``tenant_id``, ``ingest_ts`` etc.
@@ -263,9 +270,11 @@ async def opus_parse_and_chunk(
     """
     pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
     sidecar_block = format_sidecar(hyperlinks)
+    ocr_block = format_ocr_sidecar(ocr_sidecar or {})  # NEW
     user_text = USER_PROMPT_TEMPLATE.format(
         filename=filename,
         sidecar_block=sidecar_block,
+        ocr_block=ocr_block,  # NEW
     )
 
     messages = [
