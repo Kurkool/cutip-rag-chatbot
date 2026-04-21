@@ -28,6 +28,7 @@ Two-thirds of this spec's prior work (pre-flight OCR extraction, failure trackin
 - **Text-only path to Opus when content is already OCR'd.** Drop the `document` content block entirely. Send the OCR'd text as a single `text` block with page delineation, preserving smart-chunking semantics (`page`, `section_path`, `has_table`) via the existing `record_chunks` tool schema.
 - **Unify two input sources into one downstream path.** Pure-scan PDFs (C1's Haiku OCR) and `.ocr.docx` files (paragraph extraction) both normalize to `ocr_sidecar: dict[int, str]`, then feed a single text-only branch in `opus_parse_and_chunk`.
 - **Preserve Opus as smart chunker.** No dumb text splitter. Chunks retain section hierarchy, page numbers, and table flags.
+- **Align Haiku in-pipeline OCR prompt with the standalone script** so tables survive the text-only path as markdown pipe format (Opus chunker can then detect `has_table=true`). Without this, C1's Haiku OCR produces unstructured table text and the text-only path loses table fidelity.
 - **Backward compatible.** Text-layer PDFs, non-OCR'd DOCX/XLSX/PPTX — all unchanged.
 
 ## Non-goals
@@ -187,6 +188,25 @@ Format the per-page OCR text with explicit page boundaries that Opus can parse f
 ```
 
 Page markers use `===` bars (distinct from any markdown headings in content) so Opus can unambiguously attribute each chunk to the right page.
+
+### Modified: `OCR_PROMPT` constant in `ingest/services/ingestion_v2.py`
+
+The in-pipeline Haiku 4.5 OCR prompt (used by `ocr_pdf_pages`) currently asks for "โครงสร้าง (หัวข้อ ย่อหน้า รายการหัวข้อ ตาราง) เท่าที่ทำได้" without specifying an output format for tables. The standalone `scripts/ocr_pdf_via_opus.py` uses a tighter prompt with explicit markdown pipe format for tables. Empirical evidence: the `.ocr.docx` produced by the script retains table structure (country list in ประกาศ 2563 appears as `| country A | country B |`); a Haiku pass with the looser prompt would likely emit unstructured text, costing `has_table` detection downstream.
+
+Align the in-pipeline prompt to match the script:
+
+```python
+OCR_PROMPT = (
+    "สกัดข้อความทั้งหมดที่มองเห็นจากภาพสแกนหน้านี้ "
+    "คงรูปโครงสร้าง (หัวข้อ ย่อหน้า รายการหัวข้อ ตาราง) เท่าที่ทำได้ "
+    "- หัวข้อให้ขึ้นบรรทัดใหม่ "
+    "- ตารางให้ใช้ pipe markdown | col1 | col2 | "
+    "- ไม่ต้องใส่คำอธิบายใด ๆ หรือบอกว่าเป็นภาพอะไร ให้คืนเฉพาะข้อความ "
+    "- ถ้ามีภาษาอังกฤษปนให้คงไว้ตามต้นฉบับ"
+)
+```
+
+No test for prompt string content (brittle); the end-to-end text-only ingest smoke on the `.ocr.docx` plus a pure-scan PDF sample will confirm `has_table` propagates.
 
 ### New: `USER_PROMPT_TEMPLATE_TEXT_ONLY`
 
