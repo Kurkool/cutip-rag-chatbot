@@ -128,3 +128,47 @@ async def test_list_failures_returns_dict_keyed_by_drive_id(monkeypatch):
     assert set(out.keys()) == {"d1", "d2"}
     assert out["d1"]["fail_count"] == 1
     assert out["d2"]["fail_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_record_failure_firestore_outage_logs_and_does_not_raise(monkeypatch, caplog):
+    from shared.services import ingest_failures as ifs
+
+    def boom(*a, **kw):
+        raise RuntimeError("Firestore unavailable")
+
+    monkeypatch.setattr(ifs, "_record_failure_sync", boom)
+
+    with caplog.at_level("WARNING", logger="shared.services.ingest_failures"):
+        await ifs.record_failure(
+            tenant_id="t", drive_file_id="d", filename="x.pdf",
+            drive_modified=1.0, error="e",
+        )
+
+    assert any("Firestore unavailable" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_list_failures_firestore_outage_returns_empty_dict(monkeypatch):
+    from shared.services import ingest_failures as ifs
+
+    def boom(*a, **kw):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(ifs, "_list_failures_sync", boom)
+
+    out = await ifs.list_failures("t")
+    assert out == {}
+
+
+@pytest.mark.asyncio
+async def test_clear_failure_firestore_outage_does_not_raise(monkeypatch):
+    from shared.services import ingest_failures as ifs
+
+    def boom(*a, **kw):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(ifs, "_clear_failure_sync", boom)
+
+    # should not raise
+    await ifs.clear_failure("t", "d")
