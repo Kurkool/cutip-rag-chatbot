@@ -575,3 +575,22 @@ def test_read_ocr_docx_as_pages_raises_on_zip_without_content_types():
         zf.writestr("some_random_file.txt", "not a docx")
     with pytest.raises(ValueError, match="not a valid .ocr.docx"):
         ingestion_v2._read_ocr_docx_as_pages(buf.getvalue())
+
+
+def test_format_pages_for_text_only_empty_returns_placeholder():
+    result = ingestion_v2._format_pages_for_text_only({})
+    assert result == "(empty document)"
+
+
+def test_format_pages_for_text_only_has_page_markers_and_content():
+    result = ingestion_v2._format_pages_for_text_only({
+        1: "alpha text",
+        2: "beta text",
+    })
+    # Page markers use "### Page N" (matches format_ocr_sidecar convention).
+    assert "### Page 1" in result
+    assert "### Page 2" in result
+    # Content preserved in order.
+    i1 = result.index("alpha text")
+    i2 = result.index("beta text")
+    assert i1 < i2
