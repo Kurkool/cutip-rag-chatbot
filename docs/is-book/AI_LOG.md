@@ -13,6 +13,18 @@ Format:
 
 ---
 
+## 2026-04-21 (session end — corrections before handoff)
+- Task: other (fix)
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch03-methodology.md` (remove false "นิสิตต่างชาติ" claim in sample description)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch04-results.md` (fix table 4.1 — drop unverified "(ภาคปกติ)" and "ชาวไทย", soften "โรงพยาบาลเอกชน"→"โรงพยาบาลแห่งหนึ่ง", "นักแปลอิสระ"→"นักแปลภาษาญี่ปุ่น")
+  - `~/.claude/.../memory/project_is_book.md` (correct ST-01 annotation — จีน is Thai nickname, not Chinese)
+- Notes / decisions:
+  - User correction: in-depth interview cohort = 4 Thai staff (2 HSM, 1 CUTIP, 1 สิ่งแวดล้อม) + 3 Thai CUTIP students. **No international students interviewed.** Earlier prose wrongly suggested "ครอบคลุมทั้งนิสิตชาวไทยและนิสิตต่างชาติ" — now corrected.
+  - References to "นิสิตต่างชาติ" in ch4.1 §4.1.1 (lines 25, 37) remain — they describe HSM's program demographic and visa-operations context per S-02 quote, not the interview cohort. Factually correct.
+
+---
+
 ## 2026-04-21 (session end — handoff setup)
 - Task: other (session handoff)
 - Files touched:
