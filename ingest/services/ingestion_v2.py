@@ -12,6 +12,7 @@ import io
 import logging
 import os
 import re
+import zipfile
 from functools import lru_cache
 from typing import Any
 
@@ -147,20 +148,13 @@ def _read_ocr_docx_as_pages(file_bytes: bytes) -> dict[int, str]:
     ``docx.opc.exceptions.PackageNotFoundError`` so callers see a stable
     exception type).
     """
-    import zipfile
-
     from docx import Document as DocxDocument
     from docx.opc.exceptions import PackageNotFoundError
 
     try:
         doc = DocxDocument(io.BytesIO(file_bytes))
-    except (PackageNotFoundError, zipfile.BadZipFile, Exception) as exc:
-        # python-docx raises PackageNotFoundError for corrupt OPC packages and
-        # zipfile.BadZipFile when the bytes aren't a ZIP at all. Wrap both so
-        # callers get a stable ValueError contract.
-        if isinstance(exc, (PackageNotFoundError, zipfile.BadZipFile)):
-            raise ValueError(f"not a valid .ocr.docx: {exc}") from exc
-        raise
+    except (PackageNotFoundError, zipfile.BadZipFile, KeyError) as exc:
+        raise ValueError(f"not a valid .ocr.docx: {exc}") from exc
 
     pages: dict[int, list[str]] = {}
     current_page: int | None = None
