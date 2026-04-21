@@ -35,6 +35,18 @@ OCR sidecar:
 
 Parse the attached PDF and emit chunks via the `record_chunks` tool."""
 
+USER_PROMPT_TEMPLATE_TEXT_ONLY = """Document filename: {filename}
+
+The document below has been pre-OCR'd; no PDF is attached. Use the text as the sole source of truth and produce chunks via the `record_chunks` tool.
+
+Page boundaries are marked with `### Page N` — use them to set each chunk's `page` field.
+
+Hyperlink sidecar (URIs hidden in PDF annotations, not visible on the rendered page):
+{sidecar_block}
+
+{page_text_block}
+"""
+
 
 CHUNK_TOOL_SCHEMA = {
     "name": "record_chunks",
