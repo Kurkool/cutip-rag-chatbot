@@ -563,3 +563,15 @@ def test_read_ocr_docx_as_pages_raises_on_corrupt_bytes():
     """python-docx's PackageNotFoundError is wrapped in ValueError for callers."""
     with pytest.raises(ValueError, match="not a valid .ocr.docx"):
         ingestion_v2._read_ocr_docx_as_pages(b"this is not a zip file")
+
+
+def test_read_ocr_docx_as_pages_raises_on_zip_without_content_types():
+    """A valid ZIP that lacks the OPC [Content_Types].xml structure also wraps to ValueError."""
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("some_random_file.txt", "not a docx")
+    with pytest.raises(ValueError, match="not a valid .ocr.docx"):
+        ingestion_v2._read_ocr_docx_as_pages(buf.getvalue())
