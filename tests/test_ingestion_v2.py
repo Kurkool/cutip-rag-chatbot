@@ -517,3 +517,49 @@ async def test_ingest_v2_text_layer_skips_ocr(monkeypatch, tiny_text_pdf_bytes):
 
     assert captured.get("ocr_called") is not True
     assert captured["ocr_sidecar_arg"] is None
+
+
+def test_read_ocr_docx_as_pages_splits_on_page_headings():
+    """Docx with 'หน้า N' level-2 headings → pages keyed by N with joined paragraph text."""
+    import io
+    from docx import Document as DocxDocument
+
+    docx = DocxDocument()
+    docx.add_heading("doc title", level=1)            # ignored (level 1)
+    docx.add_heading("หน้า 1", level=2)
+    docx.add_paragraph("first para of page 1")
+    docx.add_paragraph("second para of page 1")
+    docx.add_heading("หน้า 2", level=2)
+    docx.add_paragraph("only para of page 2")
+    buf = io.BytesIO()
+    docx.save(buf)
+
+    result = ingestion_v2._read_ocr_docx_as_pages(buf.getvalue())
+
+    assert result == {
+        1: "first para of page 1\nsecond para of page 1",
+        2: "only para of page 2",
+    }
+
+
+def test_read_ocr_docx_as_pages_fallback_single_page_when_no_markers():
+    """Docx without any 'หน้า N' heading → all paragraphs join into page 1."""
+    import io
+    from docx import Document as DocxDocument
+
+    docx = DocxDocument()
+    docx.add_paragraph("alpha")
+    docx.add_paragraph("beta")
+    docx.add_paragraph("gamma")
+    buf = io.BytesIO()
+    docx.save(buf)
+
+    result = ingestion_v2._read_ocr_docx_as_pages(buf.getvalue())
+
+    assert result == {1: "alpha\nbeta\ngamma"}
+
+
+def test_read_ocr_docx_as_pages_raises_on_corrupt_bytes():
+    """python-docx's PackageNotFoundError is wrapped in ValueError for callers."""
+    with pytest.raises(ValueError, match="not a valid .ocr.docx"):
+        ingestion_v2._read_ocr_docx_as_pages(b"this is not a zip file")
