@@ -50,6 +50,80 @@ def _get_ocr_client():
     return AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=3)
 
 
+OCR_PROMPT = (
+    "สกัดข้อความทั้งหมดที่มองเห็นจากภาพสแกนหน้านี้ "
+    "คงรูปโครงสร้าง (หัวข้อ ย่อหน้า รายการหัวข้อ ตาราง) เท่าที่ทำได้. "
+    "ไม่ต้องใส่คำอธิบายใด ๆ ให้คืนเฉพาะข้อความเท่านั้น. "
+    "ถ้ามีภาษาอังกฤษปนให้คงไว้ตามต้นฉบับ."
+)
+
+
+async def ocr_pdf_pages(pdf_bytes: bytes, filename: str) -> dict[int, str]:
+    """Per-page vision OCR using Haiku 4.5, parallelized up to OCR_CONCURRENCY.
+
+    Returns ``{1-based page: text}``. A per-page exception yields an empty
+    string for that page (partial OCR is better than total fail). If every
+    page raises, the function raises ``RuntimeError``.
+    """
+    import asyncio
+    import base64
+    import pymupdf
+
+    client = _get_ocr_client()
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    n_pages = doc.page_count
+    # Render page images up front so the async tasks don't fight over the pymupdf handle.
+    page_pngs: dict[int, bytes] = {}
+    try:
+        for i, page in enumerate(doc):
+            page_pngs[i + 1] = page.get_pixmap(dpi=OCR_DPI).tobytes("png")
+    finally:
+        doc.close()
+
+    sem = asyncio.Semaphore(OCR_CONCURRENCY)
+
+    async def _one(page_num: int) -> tuple[int, str | BaseException]:
+        async with sem:
+            try:
+                b64 = base64.standard_b64encode(page_pngs[page_num]).decode("ascii")
+                resp = await client.messages.create(
+                    model=OCR_MODEL,
+                    max_tokens=OCR_MAX_TOKENS_PER_PAGE,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}},
+                            {"type": "text", "text": OCR_PROMPT},
+                        ],
+                    }],
+                )
+                text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
+                return page_num, "\n".join(text_parts).strip()
+            except BaseException as exc:
+                return page_num, exc
+
+    results = await asyncio.gather(*[_one(p) for p in range(1, n_pages + 1)])
+
+    out: dict[int, str] = {}
+    n_failed = 0
+    for page_num, payload in results:
+        if isinstance(payload, BaseException):
+            logger.warning("ocr_pdf_pages(%s): page %d failed: %r", filename, page_num, payload)
+            out[page_num] = ""
+            n_failed += 1
+        else:
+            out[page_num] = payload
+
+    if n_failed == n_pages:
+        raise RuntimeError(f"OCR failed for all pages of {filename!r}")
+
+    logger.info(
+        "ocr_pdf_pages(%s): OCR complete — %d pages, %d chars total, %d failed",
+        filename, n_pages, sum(len(v) for v in out.values()), n_failed,
+    )
+    return out
+
+
 @lru_cache(maxsize=1)
 def _get_opus_llm():
     """Return the Opus 4.7 LLM used for v2 parse+chunk (cached per process).
