@@ -30,6 +30,9 @@ USER_PROMPT_TEMPLATE = """Document filename: {filename}
 Hyperlink sidecar (URIs hidden in PDF annotations, not visible on the rendered page):
 {sidecar_block}
 
+OCR sidecar:
+{ocr_block}
+
 Parse the attached PDF and emit chunks via the `record_chunks` tool."""
 
 
@@ -86,3 +89,28 @@ def format_sidecar(hyperlinks: list[dict]) -> str:
     for h in hyperlinks:
         lines.append(f"- page {h['page']}: [{h['text']}]({h['uri']})")
     return "\n".join(lines)
+
+
+def format_ocr_sidecar(ocr_text: dict[int, str]) -> str:
+    """Render per-page OCR text as a stable markdown block for Opus.
+
+    Opus is told (via the user prompt) to treat the rendered PDF image as
+    ground truth and the OCR text as assistive — OCR may miss Thai tone
+    marks or confuse digits, and Opus should correct obvious errors by
+    looking at the image. Empty input returns a placeholder string so the
+    prompt template substitution never leaves a blank line dangling.
+    """
+    if not ocr_text or all(not v for v in ocr_text.values()):
+        return "(no OCR sidecar — document text layer sufficient)"
+    lines = [
+        "OCR was run on every page because the PDF has no extractable text layer.",
+        "Treat the rendered image as ground truth and correct obvious OCR errors",
+        "(mis-segmented Thai tone marks, digit/letter confusion, etc.).",
+        "",
+    ]
+    for page_num in sorted(ocr_text.keys()):
+        text = ocr_text[page_num]
+        lines.append(f"### Page {page_num}")
+        lines.append(text if text else "(OCR failed for this page — rely on vision only)")
+        lines.append("")
+    return "\n".join(lines).rstrip()
