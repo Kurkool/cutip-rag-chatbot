@@ -13,6 +13,21 @@ Format:
 
 ---
 
+## 2026-04-21 (session end — handoff setup)
+- Task: other (session handoff)
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/SESSION-HANDOFF.md` (new — startup guide for next session/computer)
+  - `~/.claude/projects/.../memory/project_is_book.md` (new — persistent memory for IS book work)
+  - `~/.claude/projects/.../memory/MEMORY.md` (add pointer to project_is_book.md)
+  - `~/.claude/projects/.../memory/project_tip_rag.md` (replaced "user uses Gemini to write thesis" with IS Book Writing Phase note pointing at project_is_book + SESSION-HANDOFF)
+- References verified: ไม่มี
+- Notes / decisions:
+  - Auto-memory + handoff doc + updated project memory = next session can pick up from clean start
+  - Quick-start prompt added to SESSION-HANDOFF.md: read CLAUDE.md + AI_LOG.md + spec + handoff, confirm unlock Q status, then resume
+  - D2 priority order: ch4.2 (derivative, no blocker) → ch4.3 (partial blocker on N) → ch1 (derivative) → ch2 (ref verify) → ch5-6 (blocked on user inputs)
+
+---
+
 ## 2026-04-21 (session 3 — draft ch4.1)
 - Task: analyze, draft
 - Files touched:
