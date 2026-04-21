@@ -291,3 +291,124 @@ async def test_gdrive_scan_skips_existing_and_routes_new_through_v2(ingest_clien
     # Crucial: v2 NOT invoked for the already-ingested file — skip is pure
     assert fake_v2.call_count == 1
     assert fake_v2.call_args.kwargs["filename"] == "new.pdf"
+
+
+# ──────────────────────────────────────
+# _process_gdrive_folder — FAIL_COOLDOWN branch (Task 12)
+# ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_scan_fail_cooldown_blocks_at_threshold(monkeypatch):
+    """fail_count >= MAX + drive_modified <= last_drive_modified → skip without calling ingest_v2."""
+    from ingest.routers import ingestion as router_mod
+    from shared.services import ingest_failures as ifs
+
+    monkeypatch.setattr(router_mod, "_get_existing_filenames", lambda ns: set())
+
+    async def fake_list_failures(tenant_id):
+        return {
+            "drive_file_abc": {
+                "fail_count": 3,
+                "last_drive_modified": 2000.0,
+            }
+        }
+    monkeypatch.setattr(ifs, "list_failures", fake_list_failures)
+
+    def fake_get_state(ns):
+        return {}  # no prior Pinecone entry
+    monkeypatch.setattr("shared.services.vectorstore.get_existing_drive_state", fake_get_state)
+
+    def fake_list_files(folder_id):
+        return [{"id": "drive_file_abc", "name": "broken.pdf", "modifiedTime": "1970-01-01T00:33:20.000Z"}]
+    monkeypatch.setattr("shared.services.gdrive.list_files", fake_list_files)
+
+    ingest_called = {"n": 0}
+
+    async def fake_ingest_v2(**kw):
+        ingest_called["n"] += 1
+        return 5
+    monkeypatch.setattr("ingest.services.ingestion_v2.ingest_v2", fake_ingest_v2)
+
+    tenant = {"tenant_id": "t", "pinecone_namespace": "ns-t"}
+    result = await router_mod._process_gdrive_folder(
+        tenant, folder_id="F", doc_category="general", skip_existing=True,
+    )
+
+    assert ingest_called["n"] == 0
+    assert any("cooldown" in s["reason"].lower() for s in result.skipped)
+
+
+@pytest.mark.asyncio
+async def test_scan_fail_cooldown_unblocks_on_drive_modified_advance(monkeypatch):
+    """drive_modified > last_drive_modified → cooldown lifts → ingest_v2 runs."""
+    from ingest.routers import ingestion as router_mod
+    from shared.services import ingest_failures as ifs
+
+    monkeypatch.setattr(router_mod, "_get_existing_filenames", lambda ns: set())
+
+    async def fake_list_failures(tenant_id):
+        return {
+            "drive_file_abc": {
+                "fail_count": 3,
+                "last_drive_modified": 1000.0,
+            }
+        }
+    monkeypatch.setattr(ifs, "list_failures", fake_list_failures)
+    monkeypatch.setattr("shared.services.vectorstore.get_existing_drive_state", lambda ns: {})
+    monkeypatch.setattr(
+        "shared.services.gdrive.list_files",
+        lambda fid: [{"id": "drive_file_abc", "name": "fixed.pdf", "modifiedTime": "2020-01-01T00:00:00.000Z"}],
+    )
+    monkeypatch.setattr("shared.services.gdrive.download_file", lambda fid: b"%PDF-1.4\n%%EOF")
+
+    ingest_called = {"n": 0}
+    async def fake_ingest_v2(**kw):
+        ingest_called["n"] += 1
+        return 5
+    monkeypatch.setattr("ingest.services.ingestion_v2.ingest_v2", fake_ingest_v2)
+
+    async def noop(*a, **kw): return None
+    monkeypatch.setattr(ifs, "record_failure", noop)
+    monkeypatch.setattr(ifs, "clear_failure", noop)
+
+    tenant = {"tenant_id": "t", "pinecone_namespace": "ns-t"}
+    await router_mod._process_gdrive_folder(
+        tenant, folder_id="F", doc_category="general", skip_existing=True,
+    )
+
+    assert ingest_called["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_scan_fail_count_below_threshold_ingests(monkeypatch):
+    """fail_count < MAX → ingest attempted."""
+    from ingest.routers import ingestion as router_mod
+    from shared.services import ingest_failures as ifs
+
+    monkeypatch.setattr(router_mod, "_get_existing_filenames", lambda ns: set())
+
+    async def fake_list_failures(tenant_id):
+        return {"drive_file_abc": {"fail_count": 2, "last_drive_modified": 9999.0}}
+    monkeypatch.setattr(ifs, "list_failures", fake_list_failures)
+    monkeypatch.setattr("shared.services.vectorstore.get_existing_drive_state", lambda ns: {})
+    monkeypatch.setattr(
+        "shared.services.gdrive.list_files",
+        lambda fid: [{"id": "drive_file_abc", "name": "f.pdf", "modifiedTime": "1970-01-01T00:00:00.000Z"}],
+    )
+    monkeypatch.setattr("shared.services.gdrive.download_file", lambda fid: b"%PDF-1.4\n%%EOF")
+
+    ingest_called = {"n": 0}
+    async def fake_ingest_v2(**kw):
+        ingest_called["n"] += 1
+        return 7
+    monkeypatch.setattr("ingest.services.ingestion_v2.ingest_v2", fake_ingest_v2)
+    async def noop(*a, **kw): return None
+    monkeypatch.setattr(ifs, "record_failure", noop)
+    monkeypatch.setattr(ifs, "clear_failure", noop)
+
+    tenant = {"tenant_id": "t", "pinecone_namespace": "ns-t"}
+    await router_mod._process_gdrive_folder(
+        tenant, folder_id="F", doc_category="general", skip_existing=True,
+    )
+
+    assert ingest_called["n"] == 1

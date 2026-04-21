@@ -12,6 +12,7 @@ from shared.schemas import (
     IngestResponse,
 )
 from ingest.services import ingestion_v2
+from shared.services import ingest_failures
 from shared.services.auth import get_accessible_tenant
 from shared.services.dependencies import fix_filename, validate_upload
 from shared.services.rate_limit import ingestion_key_func, ingestion_limit, limiter
@@ -329,15 +330,17 @@ async def _process_gdrive_folder(
     if not files:
         return GDriveIngestResult(total_files=0, ingested=[], skipped=[], errors=[])
 
-    # Build existing state from Pinecone (only when skip_existing enabled)
+    # Build existing state from Pinecone + failures from Firestore (parallel when skip_existing)
     if skip_existing:
-        drive_state = await asyncio.to_thread(get_existing_drive_state, namespace)
-        legacy_filenames = await asyncio.to_thread(_get_existing_filenames, namespace)
-        # Filenames covered by drive_state (new chunks) vs only-legacy (no drive_file_id)
+        drive_state, legacy_filenames, failures = await asyncio.gather(
+            asyncio.to_thread(get_existing_drive_state, namespace),
+            asyncio.to_thread(_get_existing_filenames, namespace),
+            ingest_failures.list_failures(tenant_id),
+        )
         state_filenames = {v["filename"] for v in drive_state.values()}
         legacy_only = legacy_filenames - state_filenames
     else:
-        drive_state, legacy_only = {}, set()
+        drive_state, legacy_only, failures = {}, set(), {}
 
     ingested, skipped, errors = [], [], []
 
@@ -349,24 +352,46 @@ async def _process_gdrive_folder(
 
         if skip_existing:
             entry = drive_state.get(drive_id)
-            if entry is not None:
-                if entry["filename"] != filename:
-                    # RENAME — old chunks must be removed before ingest
-                    stale_filename_to_delete = entry["filename"]
-                    logger.info(
-                        "Drive rename detected (tenant=%s): %r → %r",
-                        tenant_id, entry["filename"], filename,
-                    )
-                elif drive_modified <= entry["ingest_ts"]:
-                    # Up to date — skip
-                    skipped.append({"filename": filename, "reason": "up to date"})
-                    continue
-                # else OVERWRITE — fall through to ingest (_upsert dedups)
-            elif filename in legacy_only:
-                # Legacy chunk (no drive_file_id yet) — skip per old rule,
-                # next re-ingest will backfill drive_file_id
+
+            # 1. SKIP up-to-date — opportunistic clear of any stale failure doc.
+            if entry is not None and entry["filename"] == filename and drive_modified <= entry["ingest_ts"]:
+                await ingest_failures.clear_failure(tenant_id, drive_id)
+                skipped.append({"filename": filename, "reason": "up to date"})
+                continue
+
+            # 2. LEGACY (no drive_file_id yet) — preserve existing behavior.
+            if entry is None and filename in legacy_only:
                 skipped.append({"filename": filename, "reason": "legacy, no drive_file_id"})
                 continue
+
+            # 3. FAIL_COOLDOWN — stop hammer before any expensive work.
+            fail_rec = failures.get(drive_id)
+            if (fail_rec
+                    and fail_rec.get("fail_count", 0) >= ingest_failures.MAX_CONSECUTIVE_FAILURES
+                    and drive_modified <= fail_rec.get("last_drive_modified", 0.0)):
+                skipped.append({
+                    "filename": filename,
+                    "reason": (
+                        f"cooldown: {fail_rec.get('fail_count', '?')} consecutive failures — "
+                        "edit the file in Drive to retry"
+                    ),
+                })
+                logger.info(
+                    "scan-all: FAIL_COOLDOWN skip tenant=%s drive_id=%s filename=%r fail_count=%s",
+                    tenant_id, drive_id, filename, fail_rec.get("fail_count"),
+                )
+                continue
+
+            # 4. RENAME — mark old chunks for deletion, fall through to ingest.
+            if entry is not None and entry["filename"] != filename:
+                stale_filename_to_delete = entry["filename"]
+                logger.info(
+                    "Drive rename detected (tenant=%s): %r → %r",
+                    tenant_id, entry["filename"], filename,
+                )
+
+            # else: OVERWRITE (entry + newer mtime) — fall through.
+            # else: NEW (no entry, no legacy) — fall through.
 
         try:
             # RENAME cleanup first so dangling chunks don't linger
