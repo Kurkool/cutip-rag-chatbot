@@ -356,8 +356,20 @@ async def ingest_v2(
     from ingest.services.ingest_helpers import _build_metadata, _upsert
 
     pdf_bytes = ensure_pdf(file_bytes, filename)
+
+    page_text = extract_page_text(pdf_bytes)
+    ocr_sidecar: dict[int, str] | None = None
+    if sum(len(t) for t in page_text.values()) <= PURE_SCAN_TEXT_THRESHOLD:
+        logger.info(
+            "ingest_v2(%s): pure-scan detected (0 text chars across %d pages), running OCR",
+            filename, len(page_text),
+        )
+        ocr_sidecar = await ocr_pdf_pages(pdf_bytes, filename)
+
     hyperlinks = extract_hyperlinks(pdf_bytes)
-    chunks = await opus_parse_and_chunk(pdf_bytes, hyperlinks, filename)
+    chunks = await opus_parse_and_chunk(
+        pdf_bytes, hyperlinks, filename, ocr_sidecar=ocr_sidecar,
+    )
 
     if not chunks:
         logger.warning("ingest_v2(%s): Opus returned 0 chunks — nothing upserted", filename)

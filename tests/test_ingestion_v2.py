@@ -217,11 +217,15 @@ async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
         calls["ensure_pdf"] = (blob, fn)
         return b"%PDF-1.4\nnormalized\n%%EOF"
 
+    def fake_extract_page_text(pdf):
+        # Return non-empty text so the OCR path is NOT triggered.
+        return {1: "some text content"}
+
     def fake_extract_hyperlinks(pdf):
         calls["extract_hyperlinks"] = pdf
         return [{"page": 1, "text": "t", "uri": "https://x"}]
 
-    async def fake_opus(pdf, links, fn):
+    async def fake_opus(pdf, links, fn, ocr_sidecar=None):
         calls["opus"] = (pdf, links, fn)
         return [Document(page_content="body", metadata={"page": 1, "section_path": "", "has_table": False})]
 
@@ -234,6 +238,7 @@ async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
         return len(chunks)
 
     monkeypatch.setattr(ingestion_v2, "ensure_pdf", fake_ensure_pdf)
+    monkeypatch.setattr(ingestion_v2, "extract_page_text", fake_extract_page_text)
     monkeypatch.setattr(ingestion_v2, "extract_hyperlinks", fake_extract_hyperlinks)
     monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
 
@@ -452,3 +457,63 @@ async def test_opus_parse_and_chunk_without_ocr_sidecar_uses_placeholder(monkeyp
 
     text_blocks = [b["text"] for b in captured["content"] if b.get("type") == "text"]
     assert any("no OCR sidecar" in t for t in text_blocks)
+
+
+@pytest.mark.asyncio
+async def test_ingest_v2_pure_scan_triggers_ocr_path(monkeypatch, pure_scan_pdf_bytes):
+    """Pure-scan PDF must trigger ocr_pdf_pages and pass its output downstream."""
+    from unittest.mock import AsyncMock
+
+    captured: dict = {}
+
+    async def fake_ocr(pdf_bytes, filename):
+        captured["ocr_called"] = True
+        captured["filename"] = filename
+        return {1: "ocr p1", 2: "ocr p2"}
+
+    async def fake_opus(pdf_bytes, hyperlinks, filename, ocr_sidecar=None):
+        captured["ocr_sidecar_arg"] = ocr_sidecar
+        return []  # 0 chunks — we're not exercising the upsert here
+
+    monkeypatch.setattr(ingestion_v2, "ocr_pdf_pages", fake_ocr)
+    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
+
+    result = await ingestion_v2.ingest_v2(
+        file_bytes=pure_scan_pdf_bytes,
+        filename="scan.pdf",
+        namespace="ns-test",
+        tenant_id="tenant_x",
+    )
+
+    assert result == 0
+    assert captured.get("ocr_called") is True
+    assert captured["ocr_sidecar_arg"] == {1: "ocr p1", 2: "ocr p2"}
+
+
+@pytest.mark.asyncio
+async def test_ingest_v2_text_layer_skips_ocr(monkeypatch, tiny_text_pdf_bytes):
+    """Text-layer PDF must NOT trigger ocr_pdf_pages."""
+    from unittest.mock import AsyncMock
+
+    captured: dict = {}
+
+    async def fake_ocr(pdf_bytes, filename):
+        captured["ocr_called"] = True
+        return {}
+
+    async def fake_opus(pdf_bytes, hyperlinks, filename, ocr_sidecar=None):
+        captured["ocr_sidecar_arg"] = ocr_sidecar
+        return []
+
+    monkeypatch.setattr(ingestion_v2, "ocr_pdf_pages", fake_ocr)
+    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
+
+    await ingestion_v2.ingest_v2(
+        file_bytes=tiny_text_pdf_bytes,
+        filename="text.pdf",
+        namespace="ns-test",
+        tenant_id="tenant_x",
+    )
+
+    assert captured.get("ocr_called") is not True
+    assert captured["ocr_sidecar_arg"] is None
