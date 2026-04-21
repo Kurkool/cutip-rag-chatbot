@@ -594,3 +594,12 @@ def test_format_pages_for_text_only_has_page_markers_and_content():
     i1 = result.index("alpha text")
     i2 = result.index("beta text")
     assert i1 < i2
+
+
+def test_user_prompt_template_text_only_has_required_placeholders():
+    from ingest.services._v2_prompts import USER_PROMPT_TEMPLATE_TEXT_ONLY
+    assert "{filename}" in USER_PROMPT_TEMPLATE_TEXT_ONLY
+    assert "{sidecar_block}" in USER_PROMPT_TEMPLATE_TEXT_ONLY
+    assert "{page_text_block}" in USER_PROMPT_TEMPLATE_TEXT_ONLY
+    # Must NOT tell Opus to parse an attached PDF (there is no PDF block).
+    assert "attached PDF" not in USER_PROMPT_TEMPLATE_TEXT_ONLY
