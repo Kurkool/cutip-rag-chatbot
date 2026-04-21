@@ -121,6 +121,25 @@ def extract_hyperlinks(pdf_bytes: bytes) -> list[dict]:
     return links
 
 
+def extract_page_text(pdf_bytes: bytes) -> dict[int, str]:
+    """Return {1-based page index: extracted text layer} for the PDF.
+
+    Used by ``ingest_v2`` to detect pure-scan PDFs (all values empty). Also
+    exposes per-page text so future work can feed hybrid PDFs' native text
+    to Opus as an OCR-equivalent sidecar without triggering the LLM path.
+    """
+    import pymupdf
+
+    out: dict[int, str] = {}
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for i, page in enumerate(doc):
+            out[i + 1] = page.get_text("text") or ""
+    finally:
+        doc.close()
+    return out
+
+
 async def opus_parse_and_chunk(
     pdf_bytes: bytes,
     hyperlinks: list[dict],
