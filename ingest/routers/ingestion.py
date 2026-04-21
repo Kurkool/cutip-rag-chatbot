@@ -407,14 +407,29 @@ async def _process_gdrive_folder(
                 tenant_id=tenant_id, doc_category=doc_category,
                 download_link=drive_link, drive_file_id=drive_id,
             )
-            ingested.append({"filename": filename, "chunks": chunks})
-            logger.info("Ingested '%s' (%d chunks) for tenant %s", filename, chunks, tenant_id)
+
+            if chunks == 0:
+                await ingest_failures.record_failure(
+                    tenant_id=tenant_id, drive_file_id=drive_id, filename=filename,
+                    drive_modified=drive_modified, error="ingest returned 0 chunks",
+                )
+                skipped.append({"filename": filename, "reason": "0 chunks produced"})
+            else:
+                await ingest_failures.clear_failure(tenant_id, drive_id)
+                ingested.append({"filename": filename, "chunks": chunks})
+                logger.info("Ingested '%s' (%d chunks) for tenant %s", filename, chunks, tenant_id)
+
             await asyncio.sleep(3)
 
         except ValueError as exc:
+            # Unsupported-extension / user-input issues — not pipeline failures.
             skipped.append({"filename": filename, "reason": str(exc)})
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to ingest '%s'", filename)
+            await ingest_failures.record_failure(
+                tenant_id=tenant_id, drive_file_id=drive_id, filename=filename,
+                drive_modified=drive_modified, error=exc,
+            )
             errors.append({"filename": filename, "error": "ingestion failed"})
 
     if errors:
