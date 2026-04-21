@@ -27,6 +27,29 @@ from ingest.services.vision import _looks_like_refusal
 logger = logging.getLogger(__name__)
 
 
+# OCR fallback constants (used when ingest_v2 detects a pure-scan PDF)
+OCR_MODEL = "claude-haiku-4-5-20251001"
+OCR_CONCURRENCY = 4
+OCR_DPI = 200
+OCR_MAX_TOKENS_PER_PAGE = 4096
+PURE_SCAN_TEXT_THRESHOLD = 0
+
+
+@lru_cache(maxsize=1)
+def _get_ocr_client():
+    """Cached raw AsyncAnthropic client for per-page vision OCR.
+
+    Intentionally uses the raw anthropic SDK rather than langchain_anthropic:
+    the OCR call is a single image + text block with no tool use, and raw
+    SDK has cleaner async semantics and direct access to response bodies for
+    debugging. Tests monkeypatch this function (or its return value) — the
+    cache is small so a cache_clear() in a fixture is cheap.
+    """
+    from anthropic import AsyncAnthropic
+    from shared.config import settings
+    return AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY, max_retries=3)
+
+
 @lru_cache(maxsize=1)
 def _get_opus_llm():
     """Return the Opus 4.7 LLM used for v2 parse+chunk (cached per process).
