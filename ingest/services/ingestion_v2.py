@@ -66,7 +66,6 @@ async def ocr_pdf_pages(pdf_bytes: bytes, filename: str) -> dict[int, str]:
     page raises, the function raises ``RuntimeError``.
     """
     import asyncio
-    import base64
     import pymupdf
 
     client = _get_ocr_client()
@@ -99,7 +98,7 @@ async def ocr_pdf_pages(pdf_bytes: bytes, filename: str) -> dict[int, str]:
                 )
                 text_parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
                 return page_num, "\n".join(text_parts).strip()
-            except BaseException as exc:
+            except (asyncio.CancelledError, Exception) as exc:
                 return page_num, exc
 
     results = await asyncio.gather(*[_one(p) for p in range(1, n_pages + 1)])
