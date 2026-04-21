@@ -319,3 +319,55 @@ async def test_ocr_pdf_pages_returns_per_page_dict(pure_scan_pdf_bytes, monkeypa
     assert "ocr text" in result[1]
     assert "ocr text" in result[2]
     assert call_count["n"] == 2  # one call per page
+
+
+@pytest.mark.asyncio
+async def test_ocr_pdf_pages_partial_failure_returns_empty_string(pure_scan_pdf_bytes, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    class FakeContentBlock:
+        def __init__(self, text):
+            self.type = "text"
+            self.text = text
+
+    # First call raises; second succeeds. MagicMock's side_effect iterates.
+    call_count = {"n": 0}
+
+    async def fake_create(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("simulated rate limit")
+        resp = MagicMock()
+        resp.content = [FakeContentBlock("page two ok")]
+        return resp
+
+    fake_client = MagicMock()
+    fake_client.messages = MagicMock()
+    fake_client.messages.create = AsyncMock(side_effect=fake_create)
+
+    ingestion_v2._get_ocr_client.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_ocr_client", lambda: fake_client)
+
+    result = await ingestion_v2.ocr_pdf_pages(pure_scan_pdf_bytes, "test.pdf")
+
+    # One page failed → empty string at that key, no raise.
+    assert "" in result.values()
+    assert any("page two" in v for v in result.values())
+
+
+@pytest.mark.asyncio
+async def test_ocr_pdf_pages_all_pages_fail_raises(pure_scan_pdf_bytes, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    async def fake_create(**kwargs):
+        raise RuntimeError("every call fails")
+
+    fake_client = MagicMock()
+    fake_client.messages = MagicMock()
+    fake_client.messages.create = AsyncMock(side_effect=fake_create)
+
+    ingestion_v2._get_ocr_client.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_ocr_client", lambda: fake_client)
+
+    with pytest.raises(RuntimeError, match="OCR failed for all pages"):
+        await ingestion_v2.ocr_pdf_pages(pure_scan_pdf_bytes, "test.pdf")
