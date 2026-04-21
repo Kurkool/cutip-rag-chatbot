@@ -184,6 +184,27 @@ def _read_ocr_docx_as_pages(file_bytes: bytes) -> dict[int, str]:
     return {p: "\n".join(lines) for p, lines in pages.items()}
 
 
+def _format_pages_for_text_only(ocr_sidecar: dict[int, str]) -> str:
+    """Render per-page OCR text for the text-only Opus prompt (no PDF block).
+
+    Distinct from ``format_ocr_sidecar`` (in ``_v2_prompts``) which treats
+    the rendered PDF image as ground truth and OCR as assistive. Here the
+    text IS the ground truth — Opus has no image to cross-check. Page
+    markers use ``### Page N`` to match ``format_ocr_sidecar``'s convention
+    so chunk ``page`` attribution is consistent regardless of which path
+    produced the text.
+    """
+    if not ocr_sidecar:
+        return "(empty document)"
+    lines: list[str] = []
+    for page_num in sorted(ocr_sidecar.keys()):
+        text = ocr_sidecar[page_num]
+        lines.append(f"### Page {page_num}")
+        lines.append(text if text else "(no text extracted on this page)")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 @lru_cache(maxsize=1)
 def _get_opus_llm():
     """Return the Opus 4.7 LLM used for v2 parse+chunk (cached per process).
