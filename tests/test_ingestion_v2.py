@@ -273,3 +273,16 @@ def test_extract_page_text_pure_scan_returns_all_empty(pure_scan_pdf_bytes):
     assert set(result.keys()) == {1, 2}
     assert all(v == "" for v in result.values())
     assert sum(len(v) for v in result.values()) == 0
+
+
+def test_get_ocr_client_is_cached_async_anthropic():
+    from anthropic import AsyncAnthropic
+
+    # Clear the cache from any prior test run so we verify caching in isolation.
+    ingestion_v2._get_ocr_client.cache_clear()
+
+    c1 = ingestion_v2._get_ocr_client()
+    c2 = ingestion_v2._get_ocr_client()
+
+    assert isinstance(c1, AsyncAnthropic)
+    assert c1 is c2  # lru_cache returns the same instance
