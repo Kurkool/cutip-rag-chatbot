@@ -260,3 +260,16 @@ async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
     assert meta["doc_category"] == "form"
     assert meta["source_type"] == "pdf"  # everything normalizes to pdf in v2
     assert meta["download_link"] == "https://drive.google.com/file/d/xyz/view"
+
+
+def test_extract_page_text_returns_per_page_dict(tiny_text_pdf_bytes):
+    result = ingestion_v2.extract_page_text(tiny_text_pdf_bytes)
+    assert set(result.keys()) == {1}
+    assert "hello" in result[1]
+
+
+def test_extract_page_text_pure_scan_returns_all_empty(pure_scan_pdf_bytes):
+    result = ingestion_v2.extract_page_text(pure_scan_pdf_bytes)
+    assert set(result.keys()) == {1, 2}
+    assert all(v == "" for v in result.values())
+    assert sum(len(v) for v in result.values()) == 0
