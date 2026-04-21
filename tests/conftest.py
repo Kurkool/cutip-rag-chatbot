@@ -62,6 +62,48 @@ TENANT_B = {
 
 
 # ──────────────────────────────────────
+# PDF byte fixtures for ingestion tests
+# ──────────────────────────────────────
+
+@pytest.fixture
+def tiny_text_pdf_bytes() -> bytes:
+    """One-page PDF with a text layer. Used to verify NON-pure-scan flow."""
+    import pymupdf
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "hello world")
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+@pytest.fixture
+def pure_scan_pdf_bytes() -> bytes:
+    """Two-page PDF with embedded images only (no text layer at all)."""
+    import pymupdf
+    doc = pymupdf.open()
+    # Build a 1x1 white PNG for the embedded image (tiny — content is not what's tested).
+    import io, struct, zlib
+    def _tiny_png() -> bytes:
+        header = b"\x89PNG\r\n\x1a\n"
+        ihdr = b"IHDR" + struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+        ihdr_chunk = struct.pack(">I", 13) + ihdr + struct.pack(">I", zlib.crc32(ihdr))
+        raw = b"\x00\xff\xff\xff"
+        comp = zlib.compress(raw)
+        idat = b"IDAT" + comp
+        idat_chunk = struct.pack(">I", len(comp)) + idat + struct.pack(">I", zlib.crc32(idat))
+        iend = b"IEND"
+        iend_chunk = struct.pack(">I", 0) + iend + struct.pack(">I", zlib.crc32(iend))
+        return header + ihdr_chunk + idat_chunk + iend_chunk
+    for _ in range(2):
+        page = doc.new_page()
+        page.insert_image(pymupdf.Rect(0, 0, 100, 100), stream=_tiny_png())
+    data = doc.tobytes()
+    doc.close()
+    return data
+
+
+# ──────────────────────────────────────
 # In-memory Firestore mock
 # ──────────────────────────────────────
 
@@ -75,6 +117,7 @@ class FakeFirestore:
         self.conversations: dict[str, dict] = {}
         self.consents: list[dict] = []
         self.pending_registrations: dict[str, dict] = {}
+        self.ingest_failures: dict[str, dict] = {}
 
     def reset(self):
         self.tenants.clear()
@@ -83,6 +126,7 @@ class FakeFirestore:
         self.conversations.clear()
         self.consents.clear()
         self.pending_registrations.clear()
+        self.ingest_failures.clear()
 
     def seed(self):
         """Seed with test data."""
