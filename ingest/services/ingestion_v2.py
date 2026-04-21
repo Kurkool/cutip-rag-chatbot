@@ -359,12 +359,18 @@ async def ingest_v2(
 
     page_text = extract_page_text(pdf_bytes)
     ocr_sidecar: dict[int, str] | None = None
-    if sum(len(t) for t in page_text.values()) <= PURE_SCAN_TEXT_THRESHOLD:
+    total_text_chars = sum(len(t) for t in page_text.values())
+    if total_text_chars <= PURE_SCAN_TEXT_THRESHOLD:
         logger.info(
             "ingest_v2(%s): pure-scan detected (0 text chars across %d pages), running OCR",
             filename, len(page_text),
         )
         ocr_sidecar = await ocr_pdf_pages(pdf_bytes, filename)
+    else:
+        logger.debug(
+            "ingest_v2(%s): text-layer PDF (%d chars across %d pages), OCR skipped",
+            filename, total_text_chars, len(page_text),
+        )
 
     hyperlinks = extract_hyperlinks(pdf_bytes)
     chunks = await opus_parse_and_chunk(
