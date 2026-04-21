@@ -557,3 +557,38 @@ async def test_scan_skip_up_to_date_also_clears_failure(monkeypatch):
     assert ingest_called["n"] == 0  # SKIP up-to-date wins
     assert len(clear_calls) == 1  # stale doc got cleared
     assert any(s["reason"] == "up to date" for s in result.skipped)
+
+
+@pytest.mark.asyncio
+async def test_scan_valueerror_skips_without_recording(monkeypatch):
+    """Unsupported format (ValueError) goes to skipped, NOT to ingest_failures."""
+    from ingest.routers import ingestion as router_mod
+    from shared.services import ingest_failures as ifs
+
+    monkeypatch.setattr(router_mod, "_get_existing_filenames", lambda ns: set())
+    async def empty_failures(tid): return {}
+    monkeypatch.setattr(ifs, "list_failures", empty_failures)
+    monkeypatch.setattr("shared.services.vectorstore.get_existing_drive_state", lambda ns: {})
+    monkeypatch.setattr(
+        "shared.services.gdrive.list_files",
+        lambda fid: [{"id": "d", "name": "f.rtf", "modifiedTime": "2020-01-01T00:00:00.000Z"}],
+    )
+    monkeypatch.setattr("shared.services.gdrive.download_file", lambda fid: b"junk")
+    async def bad_format(**kw): raise ValueError("unsupported extension '.rtf'")
+    monkeypatch.setattr("ingest.services.ingestion_v2.ingest_v2", bad_format)
+
+    record_calls: list = []
+    async def capture(**kw): record_calls.append(kw)
+    monkeypatch.setattr(ifs, "record_failure", capture)
+    async def noop(*a, **kw): return None
+    monkeypatch.setattr(ifs, "clear_failure", noop)
+
+    tenant = {"tenant_id": "t", "pinecone_namespace": "ns-t"}
+    result = await router_mod._process_gdrive_folder(
+        tenant, folder_id="F", doc_category="general", skip_existing=True,
+    )
+
+    # KEY assertion: ValueError → skip, NOT record_failure
+    assert len(record_calls) == 0
+    assert len(result.errors) == 0
+    assert any("unsupported extension" in s["reason"] for s in result.skipped)
