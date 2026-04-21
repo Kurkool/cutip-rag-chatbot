@@ -286,3 +286,36 @@ def test_get_ocr_client_is_cached_async_anthropic():
 
     assert isinstance(c1, AsyncAnthropic)
     assert c1 is c2  # lru_cache returns the same instance
+
+
+@pytest.mark.asyncio
+async def test_ocr_pdf_pages_returns_per_page_dict(pure_scan_pdf_bytes, monkeypatch):
+    """Mock anthropic client returns scripted text per page → dict[int,str]."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    class FakeContentBlock:
+        def __init__(self, text):
+            self.type = "text"
+            self.text = text
+
+    call_count = {"n": 0}
+
+    async def fake_create(**kwargs):
+        call_count["n"] += 1
+        resp = MagicMock()
+        resp.content = [FakeContentBlock(f"page {call_count['n']} ocr text")]
+        return resp
+
+    fake_client = MagicMock()
+    fake_client.messages = MagicMock()
+    fake_client.messages.create = AsyncMock(side_effect=fake_create)
+
+    ingestion_v2._get_ocr_client.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_ocr_client", lambda: fake_client)
+
+    result = await ingestion_v2.ocr_pdf_pages(pure_scan_pdf_bytes, "test.pdf")
+
+    assert set(result.keys()) == {1, 2}
+    assert "ocr text" in result[1]
+    assert "ocr text" in result[2]
+    assert call_count["n"] == 2  # one call per page
