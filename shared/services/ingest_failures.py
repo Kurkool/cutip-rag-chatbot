@@ -92,3 +92,71 @@ async def record_failure(
             "ingest_failures.record_failure: Firestore unavailable — state not persisted (tenant=%s drive_id=%s): %r",
             tenant_id, drive_file_id, exc,
         )
+
+
+def _get_failure_sync(tenant_id: str, drive_file_id: str) -> dict[str, Any] | None:
+    snap = _get_client().collection(COLLECTION).document(_doc_id(tenant_id, drive_file_id)).get()
+    if not snap.exists:
+        return None
+    return snap.to_dict()
+
+
+async def get_failure(tenant_id: str, drive_file_id: str) -> dict[str, Any] | None:
+    """Return the failure doc dict, or None if no failure recorded."""
+    try:
+        return await asyncio.to_thread(_get_failure_sync, tenant_id, drive_file_id)
+    except Exception as exc:
+        logger.warning(
+            "ingest_failures.get_failure: Firestore unavailable (tenant=%s drive_id=%s): %r",
+            tenant_id, drive_file_id, exc,
+        )
+        return None
+
+
+def _clear_failure_sync(tenant_id: str, drive_file_id: str) -> None:
+    _get_client().collection(COLLECTION).document(_doc_id(tenant_id, drive_file_id)).delete()
+
+
+async def clear_failure(tenant_id: str, drive_file_id: str) -> None:
+    """Delete the failure doc if present. Ignores 'not found'."""
+    try:
+        await asyncio.to_thread(_clear_failure_sync, tenant_id, drive_file_id)
+        logger.info(
+            "ingest_failures.clear_failure: tenant=%s drive_id=%s",
+            tenant_id, drive_file_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "ingest_failures.clear_failure: Firestore unavailable (tenant=%s drive_id=%s): %r",
+            tenant_id, drive_file_id, exc,
+        )
+
+
+def _list_failures_sync(tenant_id: str) -> dict[str, dict[str, Any]]:
+    query = (
+        _get_client()
+        .collection(COLLECTION)
+        .where(filter=FieldFilter("tenant_id", "==", tenant_id))
+    )
+    out: dict[str, dict[str, Any]] = {}
+    for snap in query.stream():
+        data = snap.to_dict() or {}
+        drive_id = data.get("drive_file_id", "")
+        if drive_id:
+            out[drive_id] = data
+    return out
+
+
+async def list_failures(tenant_id: str) -> dict[str, dict[str, Any]]:
+    """Return {drive_file_id: failure_doc} for all failures of this tenant.
+
+    Intended for one-round-trip use in the scan loop.
+    """
+    try:
+        return await asyncio.to_thread(_list_failures_sync, tenant_id)
+    except Exception as exc:
+        logger.warning(
+            "ingest_failures.list_failures: Firestore unavailable (tenant=%s): %r",
+            tenant_id, exc,
+        )
+        return {}
