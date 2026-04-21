@@ -8,8 +8,10 @@ See docs/superpowers/specs/2026-04-18-ingest-v2-design.md for design.
 from __future__ import annotations
 
 import base64
+import io
 import logging
 import os
+import re
 from functools import lru_cache
 from typing import Any
 
@@ -122,6 +124,70 @@ async def ocr_pdf_pages(pdf_bytes: bytes, filename: str) -> dict[int, str]:
         filename, n_pages, sum(len(v) for v in out.values()), n_failed,
     )
     return out
+
+
+_OCR_DOCX_PAGE_HEADING_RE = re.compile(r"^หน้า\s+(\d+)\s*$")
+
+
+def _read_ocr_docx_as_pages(file_bytes: bytes) -> dict[int, str]:
+    """Parse a .ocr.docx (produced by ``scripts/ocr_pdf_via_opus.py``) into
+    ``{1-based page: joined text}`` matching ``ocr_pdf_pages``'s shape.
+
+    The script writes: level-1 heading (doc title, ignored) → level-2
+    ``หน้า N`` heading opening each page → paragraphs with OCR'd text.
+    This parser walks paragraphs in document order; a Heading 2 matching
+    ``r'^หน้า\\s+(\\d+)$'`` opens a new page bucket, subsequent non-heading
+    paragraphs accumulate into it joined by ``\\n``.
+
+    Fallback: if no page markers are found (hand-edited or tool-produced
+    docx), return ``{1: <all paragraphs joined>}`` so ingest proceeds as
+    single-page rather than fails outright.
+
+    Raises ``ValueError`` when python-docx cannot open the bytes (wraps
+    ``docx.opc.exceptions.PackageNotFoundError`` so callers see a stable
+    exception type).
+    """
+    import zipfile
+
+    from docx import Document as DocxDocument
+    from docx.opc.exceptions import PackageNotFoundError
+
+    try:
+        doc = DocxDocument(io.BytesIO(file_bytes))
+    except (PackageNotFoundError, zipfile.BadZipFile, Exception) as exc:
+        # python-docx raises PackageNotFoundError for corrupt OPC packages and
+        # zipfile.BadZipFile when the bytes aren't a ZIP at all. Wrap both so
+        # callers get a stable ValueError contract.
+        if isinstance(exc, (PackageNotFoundError, zipfile.BadZipFile)):
+            raise ValueError(f"not a valid .ocr.docx: {exc}") from exc
+        raise
+
+    pages: dict[int, list[str]] = {}
+    current_page: int | None = None
+
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
+        style_name = (para.style.name or "") if para.style else ""
+        if style_name == "Heading 2":
+            m = _OCR_DOCX_PAGE_HEADING_RE.match(text)
+            if m:
+                current_page = int(m.group(1))
+                pages.setdefault(current_page, [])
+                continue
+            # Other level-2 headings (unexpected) — fall through as content
+            # on the currently open page, if any.
+        if current_page is None:
+            continue
+        pages[current_page].append(text)
+
+    if not pages:
+        # No page markers — collect all non-empty paragraphs into page 1.
+        joined = "\n".join(p.text.strip() for p in doc.paragraphs if p.text.strip())
+        return {1: joined}
+
+    return {p: "\n".join(lines) for p, lines in pages.items()}
 
 
 @lru_cache(maxsize=1)
