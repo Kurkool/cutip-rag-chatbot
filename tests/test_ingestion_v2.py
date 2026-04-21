@@ -371,3 +371,22 @@ async def test_ocr_pdf_pages_all_pages_fail_raises(pure_scan_pdf_bytes, monkeypa
 
     with pytest.raises(RuntimeError, match="OCR failed for all pages"):
         await ingestion_v2.ocr_pdf_pages(pure_scan_pdf_bytes, "test.pdf")
+
+
+def test_format_ocr_sidecar_empty_dict_returns_placeholder():
+    from ingest.services._v2_prompts import format_ocr_sidecar
+    assert format_ocr_sidecar({}) == "(no OCR sidecar — document text layer sufficient)"
+
+
+def test_format_ocr_sidecar_populated_renders_per_page_sections():
+    from ingest.services._v2_prompts import format_ocr_sidecar
+    out = format_ocr_sidecar({1: "page one text", 2: "page two\nmore text"})
+    assert "### Page 1" in out
+    assert "page one text" in out
+    assert "### Page 2" in out
+    assert "page two\nmore text" in out
+
+
+def test_user_prompt_template_has_ocr_block_placeholder():
+    from ingest.services._v2_prompts import USER_PROMPT_TEMPLATE
+    assert "{ocr_block}" in USER_PROMPT_TEMPLATE
