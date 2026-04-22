@@ -703,3 +703,67 @@ async def test_opus_parse_and_chunk_pdf_path_keeps_document_block(
 
     block_types = [b.get("type") for b in captured["content"]]
     assert block_types == ["document", "text"], f"expected document+text, got {block_types}"
+
+
+@pytest.mark.asyncio
+async def test_ingest_v2_ocr_docx_skips_libreoffice_and_hyperlinks(
+    monkeypatch,
+):
+    """Filename ending in .ocr.docx → read docx paragraphs, skip ensure_pdf + extract_hyperlinks."""
+    import io
+    from docx import Document as DocxDocument
+    from unittest.mock import AsyncMock
+
+    # Build a minimal .ocr.docx with 2 pages.
+    docx = DocxDocument()
+    docx.add_heading("title", level=1)
+    docx.add_heading("หน้า 1", level=2)
+    docx.add_paragraph("page one body")
+    docx.add_heading("หน้า 2", level=2)
+    docx.add_paragraph("page two body")
+    buf = io.BytesIO()
+    docx.save(buf)
+    docx_bytes = buf.getvalue()
+
+    captured: dict = {"ensure_pdf_called": False, "hyperlinks_called": False}
+
+    def fake_ensure_pdf(blob, fn):
+        captured["ensure_pdf_called"] = True
+        return b""
+
+    def fake_extract_hyperlinks(pdf):
+        captured["hyperlinks_called"] = True
+        return []
+
+    async def fake_opus(pdf_bytes, hyperlinks, filename, ocr_sidecar=None):
+        captured["opus_pdf_bytes"] = pdf_bytes
+        captured["opus_hyperlinks"] = hyperlinks
+        captured["opus_ocr_sidecar"] = ocr_sidecar
+        return []
+
+    async def fake_upsert(chunks, namespace, extra_metadata):
+        return len(chunks)
+
+    monkeypatch.setattr(ingestion_v2, "ensure_pdf", fake_ensure_pdf)
+    monkeypatch.setattr(ingestion_v2, "extract_hyperlinks", fake_extract_hyperlinks)
+    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
+
+    import ingest.services.ingest_helpers as v1_mod
+    monkeypatch.setattr(v1_mod, "_upsert", fake_upsert)
+
+    result = await ingestion_v2.ingest_v2(
+        file_bytes=docx_bytes,
+        filename="ประกาศ.ocr.docx",
+        namespace="ns-test",
+        tenant_id="t",
+    )
+
+    assert result == 0
+    assert captured["ensure_pdf_called"] is False
+    assert captured["hyperlinks_called"] is False
+    assert captured["opus_pdf_bytes"] is None
+    assert captured["opus_hyperlinks"] == []
+    assert captured["opus_ocr_sidecar"] == {
+        1: "page one body",
+        2: "page two body",
+    }
