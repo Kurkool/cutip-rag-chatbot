@@ -13,6 +13,30 @@ Format:
 
 ---
 
+## 2026-04-23 (session 8 — ch7 + front/back matter + docx export — MANUSCRIPT COMPLETE)
+- Task: draft, polish, export
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch07-conclusion.md` (new ~10 pages)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/frontmatter.md` (new — cover TH/EN, approval page, abstracts TH+EN, acknowledgements with AI use disclosure, TOC skeleton)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/backmatter.md` (new — bibliography manual listing with EndNote fallback, 6 appendices: TAM questionnaire, interview questions, post-eva guide, knowledge base docs, eval test set, AI usage statement + biography placeholder)
+  - `cutip-rag-chatbot/docs/is-book/build_viriya_docx.py` (new — python-docx pipeline)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS.docx` (new — 121K bytes, 748 paragraphs, 23 tables, Chula margins L=1.5"/RTB=1", TH Sarabun New 16pt + th-TH lang tag throughout)
+- Ch 7 structure: 7.1 summary per RQ / 7.2 discussion linking to lit review + Thai context / 7.3 limitations (sample size, scope, researcher bias, data currency, financial estimates) / 7.4 recommendations (academic, technical, business) / 7.5 future research (4 directions)
+- Export script features:
+  - Converts markdown headings (# through ######) to Word headings with size 22/18/16/16/16
+  - Page break before each chapter (detected by first `# ` in chapter files)
+  - Markdown tables → Word tables with grid style
+  - Bullet/numbered lists preserved
+  - Bold (`**`) + inline code (`` ` ``) handled
+  - TH Sarabun New applied at all font fields (ascii/hAnsi/cs/eastAsia) + szCs + lang bidi
+  - Center-aligned top-level headings
+- Acknowledgements explicitly disclose Claude Opus 4.7 usage per CLAUDE.md R10 + Appendix ฉ details the rules and scope (R1 no fabrication, R2 verified citations, R3 raw data integrity)
+- Bibliography: listed manually in backmatter.md for preview; user imports verified-refs.ris to EndNote library and runs Update Citations and Bibliography in Word to replace manual list with properly-formatted APA 7
+- **MANUSCRIPT STATUS: COMPLETE — all chapters drafted, exported to docx, ready for user review + EndNote bibliography step + final polish**
+- Total pages estimate: ~124 (front 10 + ch1-7 93 + back 21)
+
+---
+
 ## 2026-04-23 (session 7 — draft ch5 + ch6 with research defaults)
 - Task: lit search, draft, analyze
 - Files touched:
