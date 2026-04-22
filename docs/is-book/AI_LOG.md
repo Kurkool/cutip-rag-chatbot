@@ -13,6 +13,31 @@ Format:
 
 ---
 
+## 2026-04-22 (session 4 — draft ch4.3)
+- Task: analyze, draft
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch04-results.md` (+ §4.3 ~20K chars, full draft)
+- Data sources used:
+  - `IS-related/IS-Data/evaluation/project-eva/VIRIYA RAG EVALUATION.xlsx` — sheets "chatbot-evaluation - ธารา" (N=1 Q1-7 with ratings), "admin-portal-task - ธารา", "chatbot-evaluation - พี่แมน" (N=2 evaluator new, 7 topics), "admin-portal-task - พี่แมน"
+  - `IS-related/IS-Data/evaluation/post-evaluation-interview/transcript/` — 3 new .txt (ธารา 115 lines + พี่แมน parts 1+2 = 61 lines)
+  - `IS-related/CUTIP RAG Final (Responses).xlsx` — TAM survey N=6
+- Anonymization additions: introduced **S-05** for พี่แมน (TIP staff #2, evaluator only, not in §4.1 in-depth cohort)
+- TAM aggregation:
+  - PU 4.25 (Q15-18), PEOU 4.33 (Q19-22), Credibility 4.22 (Q23-25), Intention 4.22 (Q26-28) — all means >4.20/5.0
+  - Widest spread: Q20 (pipe+receive without confusion) SD=1.10
+- Eval summary (N=2, 14 Qs): 50% deploy-ready / 28.6% need fix / 21.4% unusable. Gaps = ตารางเรียน + ประกาศทุน + ค่าเล่าเรียน (data freshness issue, not model capability)
+- Admin portal: Task 1 upload avg 10.5 min diff 3.5 (hardest), Task 2/3 easy 1-2 min 100% success
+- Post-eva key quotes (R3+R5 compliant, file+line references preserved):
+  - S-01: 16-17 hr/week time saved estimate, chat logs want per-user categorization
+  - S-05: 4→2 hr/day reduction, pricing "weighted per student not flat", WTP declined (deferred to ผอ.หลักสูตร), feature wishlist = cross-platform federation with บัณฑิตวิทยาลัย
+- Notes / decisions:
+  - §4.3 partial answers unlock Q2 (WTP): S-05 explicitly said "can't give price — ผอ. หลักสูตรตัดสิน" + preference for weighted per-student model. Ch5-6 inputs still pending from user on other Qs.
+  - Soften 2 minor AI-pattern usages (ดังนั้น → เจ้าหน้าที่จึง; อย่างไรก็ตาม → ข้อที่มีความหลากหลายสูงที่สุด)
+  - 0 [TBD:] in §4.3 — data complete for N=2 + N=6
+  - 1 [FIGURE 4.1] placeholder for TAM bar chart — to generate later with matplotlib
+
+---
+
 ## 2026-04-21 (session end — corrections before handoff)
 - Task: other (fix)
 - Files touched:
