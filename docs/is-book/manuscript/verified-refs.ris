@@ -83,3 +83,143 @@ EP  - 101
 DO  - 10.1191/1478088706qp063oa
 PB  - Taylor & Francis
 ER  -
+
+TY  - JOUR
+ID  - 6
+AU  - Vaswani, Ashish
+AU  - Shazeer, Noam
+AU  - Parmar, Niki
+AU  - Uszkoreit, Jakob
+AU  - Jones, Llion
+AU  - Gomez, Aidan N.
+AU  - Kaiser, Łukasz
+AU  - Polosukhin, Illia
+PY  - 2017
+TI  - Attention is all you need
+T2  - Advances in Neural Information Processing Systems
+JF  - Advances in Neural Information Processing Systems
+JO  - Advances in Neural Information Processing Systems
+VL  - 30
+SP  - 5998
+EP  - 6008
+PB  - Curran Associates, Inc.
+UR  - https://papers.nips.cc/paper/7181-attention-is-all-you-need
+ER  -
+
+TY  - CHAP
+ID  - 7
+AU  - Karpukhin, Vladimir
+AU  - Oğuz, Barlas
+AU  - Min, Sewon
+AU  - Lewis, Patrick
+AU  - Wu, Ledell
+AU  - Edunov, Sergey
+AU  - Chen, Danqi
+AU  - Yih, Wen-tau
+PY  - 2020
+TI  - Dense passage retrieval for open-domain question answering
+BT  - Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)
+T2  - Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP)
+SP  - 6769
+EP  - 6781
+PB  - Association for Computational Linguistics
+DO  - 10.18653/v1/2020.emnlp-main.550
+UR  - https://aclanthology.org/2020.emnlp-main.550/
+ER  -
+
+TY  - JOUR
+ID  - 8
+AU  - Gao, Yunfan
+AU  - Xiong, Yun
+AU  - Gao, Xinyu
+AU  - Jia, Kangxiang
+AU  - Pan, Jinliu
+AU  - Bi, Yuxi
+AU  - Dai, Yi
+AU  - Sun, Jiawei
+AU  - Wang, Meng
+AU  - Wang, Haofen
+PY  - 2024
+TI  - Retrieval-augmented generation for large language models: A survey
+T2  - arXiv preprint
+JF  - arXiv preprint
+JO  - arXiv preprint
+VL  - 2312.10997
+PB  - arXiv
+UR  - https://arxiv.org/abs/2312.10997
+ER  -
+
+TY  - JOUR
+ID  - 9
+AU  - Venkatesh, Viswanath
+AU  - Davis, Fred D.
+PY  - 2000
+TI  - A theoretical extension of the technology acceptance model: Four longitudinal field studies
+T2  - Management Science
+JF  - Management Science
+JO  - Management Science
+VL  - 46
+IS  - 2
+SP  - 186
+EP  - 204
+DO  - 10.1287/mnsc.46.2.186.11926
+PB  - INFORMS
+ER  -
+
+TY  - RPRT
+ID  - 10
+AU  - Anthropic
+PY  - 2024
+TI  - The Claude 3 model family: Opus, Sonnet, Haiku (Model card)
+PB  - Anthropic
+CY  - San Francisco, CA
+UR  - https://www.anthropic.com/claude-3-model-card
+ER  -
+
+TY  - JOUR
+ID  - 11
+AU  - Nogueira, Rodrigo
+AU  - Cho, Kyunghyun
+PY  - 2019
+TI  - Passage re-ranking with BERT
+T2  - arXiv preprint
+JF  - arXiv preprint
+JO  - arXiv preprint
+VL  - 1901.04085
+PB  - arXiv
+UR  - https://arxiv.org/abs/1901.04085
+ER  -
+
+TY  - JOUR
+ID  - 12
+AU  - Robertson, Stephen
+AU  - Zaragoza, Hugo
+PY  - 2009
+TI  - The probabilistic relevance framework: BM25 and beyond
+T2  - Foundations and Trends in Information Retrieval
+JF  - Foundations and Trends in Information Retrieval
+JO  - Foundations and Trends in Information Retrieval
+VL  - 3
+IS  - 4
+SP  - 333
+EP  - 389
+DO  - 10.1561/1500000019
+PB  - Now Publishers
+ER  -
+
+TY  - JOUR
+ID  - 13
+AU  - Labadze, Lasha
+AU  - Grigolia, Maya
+AU  - Machaidze, Lela
+PY  - 2023
+TI  - Role of AI chatbots in education: A systematic literature review
+T2  - International Journal of Educational Technology in Higher Education
+JF  - International Journal of Educational Technology in Higher Education
+JO  - International Journal of Educational Technology in Higher Education
+VL  - 20
+IS  - 1
+SP  - 56
+DO  - 10.1186/s41239-023-00426-1
+PB  - Springer
+ER  -

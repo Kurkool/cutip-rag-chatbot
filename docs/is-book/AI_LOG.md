@@ -13,6 +13,30 @@ Format:
 
 ---
 
+## 2026-04-22 (session 6 — draft ch1 + ch2)
+- Task: draft, lit search
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch01-introduction.md` (new ~9.4K chars, 7 pages)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch02-literature-review.md` (new ~14.2K chars, 11 pages)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/verified-refs.ris` (+8 refs, now RecNum 1-13)
+- References verified (this session):
+  - Vaswani et al. 2017 — Attention Is All You Need. NeurIPS 30 (#6)
+  - Karpukhin et al. 2020 — Dense Passage Retrieval. EMNLP 6769-6781 (#7)
+  - Gao et al. 2024 — RAG Survey. arXiv:2312.10997 (#8)
+  - Venkatesh & Davis 2000 — TAM2. Management Science 46(2) 186-204 (#9)
+  - Anthropic 2024 — Claude 3 Model Card (technical report) (#10)
+  - Nogueira & Cho 2019 — Passage Re-ranking with BERT. arXiv:1901.04085 (#11)
+  - Robertson & Zaragoza 2009 — BM25 Probabilistic Relevance Framework. Foundations & Trends IR 3(4) 333-389 (#12)
+  - Labadze et al. 2023 — AI chatbots in education systematic review. IJEHE 20(1) 56 (#13)
+- Ch 1 structure: 1.1-1.6 (problem, RQs, objectives, scope, benefits, terms)
+- Ch 2 structure: 2.1 Transformer+Claude, 2.2 RAG (Naive/Advanced/Modular+Agentic), 2.3 DPR+BM25+Reranker, 2.4 Multi-tenant, 2.5 TAM+TAM2, 2.6 Chatbot-edu, 2.7 Conceptual framework
+- 24 inline citations spanning 11 unique refs (#1, 2, 3, 6, 7, 8, 9, 10, 11, 12, 13)
+- Note: Ch 2 is ~11 pages vs 18-22 page design target. Content is complete across 7 sections; pragmatic ship decision — can expand in R11 sweep if needed
+- 0 heavy AI patterns (1 "ดังนั้น" usage in ch 2, acceptable)
+- 1 [FIGURE 2.1] placeholder (conceptual framework diagram — to generate with Mermaid later)
+
+---
+
 ## 2026-04-22 (session 5 — draft ch4.2)
 - Task: draft
 - Files touched:
