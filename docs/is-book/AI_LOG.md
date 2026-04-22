@@ -13,6 +13,35 @@ Format:
 
 ---
 
+## 2026-04-23 (session 7 — draft ch5 + ch6 with research defaults)
+- Task: lit search, draft, analyze
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch05-business-feasibility.md` (new ~15K chars, 12 pages)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch06-financial-feasibility.md` (new ~11K chars, 9 pages)
+- Research sources (not added to verified-refs.ris — used as market intelligence, not academic citations):
+  - MHESI: 154 accredited Thai higher-ed institutions (2023 count)
+  - Grand View Research: Thailand bot market USD 125.5M (2024), CAGR 23.6% 2025-2030
+  - Botnoi Group: point-based pricing, 7,500 free points/month (1,500 msg)
+  - ZWIZ.AI: starts 500 THB/mo, free tier available
+  - Anthropic: Opus 4.7 $5/$25 per M tokens
+  - Cohere: embed $0.08/M tokens, rerank $2/1K requests
+  - Pinecone: Standard $50/mo min, storage $0.33/GB/mo
+- Key estimated numbers (all marked with [USER-VERIFY:]):
+  - Per-tenant variable cost ~฿2,580/mo (3K queries baseline)
+  - Fixed system cost ~฿3,500/mo
+  - Personnel cost ~฿120,000/mo (solo baseline)
+  - Pricing tiers: Starter 5-8K, Pro 12-18K, Enterprise 25-40K THB/mo
+  - Break-even: 14 tenants (base case), 11-12 months payback
+  - Initial investment ~300K THB (including dev labor)
+- Notes / decisions:
+  - User chose option (C) — claude researches defaults with [USER-VERIFY:] markers throughout
+  - 31 [USER-VERIFY:] markers total across ch5 (17) + ch6 (14) — every specific number flagged
+  - Ch 5 structure: 5.1 market + 5.2 value prop + 5.3 buying center + 5.4 competitors + 5.5 pricing + 5.6 go-to-market + 5.7 SWOT
+  - Ch 6 structure: 6.1 cost structure (variable/fixed/personnel) + 6.2 revenue projection + 6.3 initial investment + 6.4 break-even + 6.5 sensitivity (3 scenarios) + 6.6 limitations
+  - Running total: ch1-6 done ≈ 85 pages. Remaining: ch7 + front matter + back matter + docx export
+
+---
+
 ## 2026-04-22 (D2 end — handoff refresh)
 - Task: other (handoff setup)
 - Files touched:
