@@ -446,11 +446,11 @@ async def ingest_v2(
     """v2 universal ingestion entrypoint.
 
     Pipeline:
-      1. ``ensure_pdf`` — normalize any supported format to PDF bytes
-      2. ``extract_hyperlinks`` — deterministic sidecar for hidden URIs
-      3. ``opus_parse_and_chunk`` — one Opus 4.7 call returns chunks with
-         section context already inlined (no separate enrichment pass)
-      4. ``_upsert`` (reused from v1) — Cohere embed, Pinecone atomic swap,
+      1. Route by filename:
+         - ``.ocr.docx`` → ``_read_ocr_docx_as_pages`` → text-only Opus path
+         - other → ``ensure_pdf`` + pure-scan detection → OCR or not → Opus
+      2. ``opus_parse_and_chunk`` returns chunks with page/section_path/has_table
+      3. ``_upsert`` (reused from v1) — Cohere embed, Pinecone atomic swap,
          BM25 cross-process invalidation
 
     ``drive_file_id`` (optional) stores the Drive file ID in chunk metadata
@@ -459,24 +459,37 @@ async def ingest_v2(
     """
     from ingest.services.ingest_helpers import _build_metadata, _upsert
 
-    pdf_bytes = ensure_pdf(file_bytes, filename)
+    pdf_bytes: bytes | None
+    hyperlinks: list[dict]
+    ocr_sidecar: dict[int, str] | None
 
-    page_text = extract_page_text(pdf_bytes)
-    ocr_sidecar: dict[int, str] | None = None
-    total_text_chars = sum(len(t) for t in page_text.values())
-    if total_text_chars <= PURE_SCAN_TEXT_THRESHOLD:
+    if filename.lower().endswith(".ocr.docx"):
+        # OCR'd content already — skip LibreOffice + PDF path entirely.
+        ocr_sidecar = _read_ocr_docx_as_pages(file_bytes)
+        pdf_bytes = None
+        hyperlinks = []
         logger.info(
-            "ingest_v2(%s): pure-scan detected (0 text chars across %d pages), running OCR",
-            filename, len(page_text),
+            "ingest_v2(%s): .ocr.docx detected — %d pages, %d total chars, skipping LibreOffice + PDF path",
+            filename, len(ocr_sidecar), sum(len(t) for t in ocr_sidecar.values()),
         )
-        ocr_sidecar = await ocr_pdf_pages(pdf_bytes, filename)
     else:
-        logger.debug(
-            "ingest_v2(%s): text-layer PDF (%d chars across %d pages), OCR skipped",
-            filename, total_text_chars, len(page_text),
-        )
+        pdf_bytes = ensure_pdf(file_bytes, filename)
+        page_text = extract_page_text(pdf_bytes)
+        total_text_chars = sum(len(t) for t in page_text.values())
+        if total_text_chars <= PURE_SCAN_TEXT_THRESHOLD:
+            logger.info(
+                "ingest_v2(%s): pure-scan detected (0 text chars across %d pages), running OCR",
+                filename, len(page_text),
+            )
+            ocr_sidecar = await ocr_pdf_pages(pdf_bytes, filename)
+        else:
+            logger.debug(
+                "ingest_v2(%s): text-layer PDF (%d chars across %d pages), OCR skipped",
+                filename, total_text_chars, len(page_text),
+            )
+            ocr_sidecar = None
+        hyperlinks = extract_hyperlinks(pdf_bytes)
 
-    hyperlinks = extract_hyperlinks(pdf_bytes)
     chunks = await opus_parse_and_chunk(
         pdf_bytes, hyperlinks, filename, ocr_sidecar=ocr_sidecar,
     )
