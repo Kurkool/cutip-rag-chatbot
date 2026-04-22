@@ -321,48 +321,65 @@ def extract_page_text(pdf_bytes: bytes) -> dict[int, str]:
 
 
 async def opus_parse_and_chunk(
-    pdf_bytes: bytes,
+    pdf_bytes: bytes | None,
     hyperlinks: list[dict],
     filename: str,
     ocr_sidecar: dict[int, str] | None = None,
 ) -> list[Document]:
-    """Send PDF + sidecar to Opus 4.7 with auto tool use, return chunks.
+    """Send PDF + sidecar (or text-only content) to Opus 4.7 with auto tool use, return chunks.
 
-    Opus receives:
-    - System prompt defining chunking rules and tool-call contract
-    - User message: PDF as ``document`` content block + text describing
-      filename and hyperlink sidecar
-    - ``tool_choice={"type": "auto"}`` — the system prompt instructs Opus
-      to call ``record_chunks`` exactly once, and in practice it does.
-      Forced tool_choice is intentionally NOT used: Anthropic disallows
-      adaptive thinking when a tool is forced, and without thinking
-      Opus silently returned empty chunk arrays on long/dense docs
-      (45-page slide decks, 20+ student announcement records).
+    Two content-block shapes:
 
-    When ``ocr_sidecar`` is provided (pure-scan path), per-page OCR text is
-    injected into the user prompt via ``{ocr_block}`` alongside the hyperlink
-    sidecar. The PDF document block is still sent so Opus can cross-check
-    vision against OCR.
+    1. **Text-only path** (``ocr_sidecar is not None``): single ``text`` block
+       with filename, hyperlink sidecar, and page-delineated OCR text. No
+       PDF ``document`` block. Used for pure-scan PDFs (Haiku OCR output)
+       and ``.ocr.docx`` files (paragraph extraction). Empirically Opus
+       silent-fails on the document-block path for long dense Thai legal
+       scans; text-only keeps the smart-chunking contract without the
+       failure mode.
+
+    2. **PDF path** (``ocr_sidecar is None``): legacy shape — ``document``
+       block (base64 PDF) + ``text`` block (filename + hyperlink sidecar +
+       empty OCR sidecar placeholder). Used for text-layer PDFs where
+       Anthropic's internal PDF processing is reliable. Unchanged.
+
+    Both paths use ``tool_choice={"type": "auto"}`` + ``record_chunks``
+    tool schema (see :func:`_get_opus_llm` docstring for why forced
+    tool_choice is not used).
 
     Returns a list of LangChain ``Document`` objects with metadata
-    ``{page, section_path, has_table}``. Higher-level ``_upsert`` layers
-    on ``source_filename``, ``tenant_id``, ``ingest_ts`` etc.
-
-    Empty / refusal / malformed responses return ``[]`` — the caller
-    treats that as "no ingestable content".
+    ``{page, section_path, has_table}``. Empty / refusal / malformed
+    responses return ``[]``.
     """
-    pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
-    sidecar_block = format_sidecar(hyperlinks)
-    ocr_block = format_ocr_sidecar(ocr_sidecar or {})  # NEW
-    user_text = USER_PROMPT_TEMPLATE.format(
-        filename=filename,
-        sidecar_block=sidecar_block,
-        ocr_block=ocr_block,  # NEW
+    from ingest.services._v2_prompts import (
+        USER_PROMPT_TEMPLATE_TEXT_ONLY,
     )
 
-    messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=[
+    sidecar_block = format_sidecar(hyperlinks)
+
+    if ocr_sidecar is not None:
+        # Text-only path: no document block.
+        page_text_block = _format_pages_for_text_only(ocr_sidecar)
+        user_text = USER_PROMPT_TEMPLATE_TEXT_ONLY.format(
+            filename=filename,
+            sidecar_block=sidecar_block,
+            page_text_block=page_text_block,
+        )
+        human_content: list[dict] = [{"type": "text", "text": user_text}]
+    else:
+        # Legacy PDF path: document block + text block.
+        if pdf_bytes is None:
+            raise ValueError(
+                "opus_parse_and_chunk: pdf_bytes cannot be None when ocr_sidecar is None"
+            )
+        pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+        ocr_block = format_ocr_sidecar({})  # always empty on this path
+        user_text = USER_PROMPT_TEMPLATE.format(
+            filename=filename,
+            sidecar_block=sidecar_block,
+            ocr_block=ocr_block,
+        )
+        human_content = [
             {
                 "type": "document",
                 "source": {
@@ -372,7 +389,11 @@ async def opus_parse_and_chunk(
                 },
             },
             {"type": "text", "text": user_text},
-        ]),
+        ]
+
+    messages = [
+        SystemMessage(content=SYSTEM_PROMPT),
+        HumanMessage(content=human_content),
     ]
 
     llm = _get_opus_llm().bind_tools(
