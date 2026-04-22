@@ -13,6 +13,22 @@ Format:
 
 ---
 
+## 2026-04-22 (D2 end — handoff refresh)
+- Task: other (handoff setup)
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/SESSION-HANDOFF.md` (refresh with D2 state: ch1-4 done, 64 pages, 13 refs verified)
+  - `~/.claude/.../memory/project_is_book.md` (refresh with updated status, refs table, commit history)
+- Notes / decisions:
+  - D1 done: ch3 + ch4.1 (~22 pages)
+  - D2 done: ch4.2 + ch4.3 + ch1 + ch2 (~42 more pages → total 64 pages)
+  - D3 plan: ch5-6 (if unlock Qs answered or user approves research-backed defaults with `[USER-VERIFY:]` markers) + ch7 + front/back matter + docx export
+  - D4: submit
+  - verified-refs.ris: 13 refs total (started session 1 with 3, added 2 in session 2, added 8 in session 6)
+  - No NEW data from user expected unless they add more post-eva or fill sheet 3 of xlsx
+  - If blocked indefinitely on unlock Qs, Ch 5-6 can proceed with research-backed defaults tagged `[USER-VERIFY:]` — user can edit before submit
+
+---
+
 ## 2026-04-22 (session 6 — draft ch1 + ch2)
 - Task: draft, lit search
 - Files touched:
