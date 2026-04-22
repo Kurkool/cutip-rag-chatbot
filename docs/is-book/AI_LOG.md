@@ -13,6 +13,22 @@ Format:
 
 ---
 
+## 2026-04-22 (session 5 — draft ch4.2)
+- Task: draft
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch04-results.md` (+ §4.2 ~10K chars)
+- Data sources used:
+  - `cutip-rag-chatbot/docs/architecture.md` §§1-2 (system overview, microservices), §11 (v1→v2→v2.1 evolution)
+  - `cutip-rag-chatbot/docs/thesis-project-detail.md` (referenced)
+- Notes / decisions:
+  - Structure: 4.2.1 architecture / 4.2.2 evolution v1→v2→v2.1 / 4.2.3 technical metrics
+  - Key figures tracked: 266 tests (237 backend + 29 frontend), 14 files → 148 chunks, 24/24 Thai names + 23/23 student IDs + 2/2 emails preserved, 20/20 adversarial probe pass, cold-start 7s → 1.14s (85% ingestion code reduction v1→v2)
+  - Citations: Bezemer 2010 #3 used 2x for multi-tenant SaaS architecture
+  - 2 FIGURE markers: 4.2 architecture, 4.3 evolution timeline
+  - Ch 4 total now 45.5K chars ≈ 35 pages rendered. ~20% over budget (25-30 page target) — trim in R11 final sweep before export
+
+---
+
 ## 2026-04-22 (session 4 — draft ch4.3)
 - Task: analyze, draft
 - Files touched:
