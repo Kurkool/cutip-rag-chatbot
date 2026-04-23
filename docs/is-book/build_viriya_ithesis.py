@@ -27,7 +27,17 @@ from docx.oxml.ns import qn
 BASE = Path(__file__).parent
 MANUSCRIPT = BASE / "manuscript"
 TEMPLATE = BASE / "VIRIYA-iThesis.docx"
-OUT = BASE / "VIRIYA-IS-ithesis.docx"
+import sys as _sys
+OUT_PRIMARY = BASE / "VIRIYA-IS-ithesis.docx"
+OUT_FALLBACK = BASE / "VIRIYA-IS-ithesis-v2.docx"
+try:
+    # If primary is open in Word, writing will fail — use fallback
+    _test = open(OUT_PRIMARY, "a+b")
+    _test.close()
+    OUT = OUT_PRIMARY
+except (PermissionError, OSError):
+    OUT = OUT_FALLBACK
+    print(f"(PRIMARY {OUT_PRIMARY.name} locked — saving to {OUT.name} instead)", file=_sys.stderr)
 
 # Order of chapter files to insert
 CHAPTER_FILES = [

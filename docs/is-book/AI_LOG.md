@@ -13,6 +13,35 @@ Format:
 
 ---
 
+## 2026-04-23 (session 10 — TIP-aligned framework expansion)
+- Task: draft (add standard TIP-expected frameworks to ch5 + ch6)
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch05-business-feasibility.md` (+PESTEL, Five Forces, STP, 7Ps — now 25K chars, 11 sections)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch06-financial-feasibility.md` (+P&L 3-year, Cash Flow 3-year — now 16K chars, 8 sections)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch01-introduction.md` (session earlier: added 1.5 methodology brief)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS-ithesis.docx` (rebuilt 127K)
+- Rationale: comparison with พี่อู๋'s TIP 2566 example IS revealed 6 gaps in ch5 (4 marketing frameworks) + ch6 (2 financial statements). User chose option A = add all.
+- Ch 5 additions:
+  - 5.8 PESTEL (6 factors) — macro environment analysis
+  - 5.9 Porter's Five Forces — industry competition analysis with 5-row table
+  - 5.10 STP Marketing (3 sub-sections: Segmentation, Targeting niche=graduate programs, Positioning statement)
+  - 5.11 Marketing Mix 7Ps for SaaS (Product/Price/Place/Promotion/People/Process/Physical Evidence)
+- Ch 6 additions:
+  - 6.6 งบกำไรขาดทุน 3 ปี — full P&L table with revenue/COGS/gross profit/operating expenses/depreciation/tax/net profit for Y1-Y3. Shows break-even Y1 + 27% net margin Y2 + 30% Y3.
+  - 6.7 งบกระแสเงินสด 3 ปี — cash flow from operations/investing/financing activities. Initial investment ฿400K + ฿300K system dev, reaches ฿3.76M cash by end Y3.
+  - 6.8 ข้อจำกัด (was 6.6, renumbered)
+- Assumptions in P&L:
+  - Tenant growth 2/month Y1-Y2, slowing to 1/month Y3 (base case)
+  - Weighted avg revenue ฿11,650/tenant/mo
+  - Variable cost ฿2,580/tenant/mo
+  - Personnel ฿1.44M Y1 / ฿1.8M Y2 / ฿2.4M Y3
+  - Corporate tax 20%
+  - 3-year depreciation of initial investment
+- All new financial numbers tagged [USER-VERIFY:]
+- Total [USER-VERIFY:] markers now: ch5=19, ch6=16 (35 total across ch5-6)
+
+---
+
 ## 2026-04-23 (session 9 — iThesis Next Gen integration)
 - Task: other (format integration)
 - Files touched:
