@@ -51,6 +51,39 @@ CHAPTER_FILES = [
 ]
 
 
+THAI_FONT = "TH Sarabun New"
+
+
+def force_thai_font_on_style(doc, style_name: str):
+    """Override rFonts on a style to force TH Sarabun New (ascii/cs/hAnsi).
+    Fixes iThesis template's Heading styles that inherit Aptos via theme."""
+    try:
+        style = doc.styles[style_name]
+    except KeyError:
+        return
+    rPr = style.element.find(qn("w:rPr"))
+    if rPr is None:
+        rPr = OxmlElement("w:rPr")
+        style.element.insert(0, rPr)
+    rFonts = rPr.find(qn("w:rFonts"))
+    if rFonts is None:
+        rFonts = OxmlElement("w:rFonts")
+        rPr.append(rFonts)
+    # Remove theme attributes so explicit font takes effect
+    for theme_attr in ("w:asciiTheme", "w:hAnsiTheme", "w:cstheme", "w:eastAsiaTheme"):
+        if rFonts.get(qn(theme_attr)) is not None:
+            del rFonts.attrib[qn(theme_attr)]
+    rFonts.set(qn("w:ascii"), THAI_FONT)
+    rFonts.set(qn("w:hAnsi"), THAI_FONT)
+    rFonts.set(qn("w:cs"), THAI_FONT)
+    # Ensure Thai language tag
+    lang = rPr.find(qn("w:lang"))
+    if lang is None:
+        lang = OxmlElement("w:lang")
+        rPr.append(lang)
+    lang.set(qn("w:bidi"), "th-TH")
+
+
 def find_insertion_point(doc):
     """Locate the <w:p> element right after "คำอธิบายสัญลักษณ์ (ถ้ามี)" section ends,
     which is where chapters should be inserted.
@@ -257,6 +290,14 @@ def main():
 
     # Open iThesis template as base
     doc = Document(str(TEMPLATE))
+
+    # Force TH Sarabun New on Heading 1-9 + Normal + List Paragraph
+    # (iThesis template leaves these with theme font → defaults to Aptos in modern Word)
+    for style_name in ["Normal", "List Paragraph", "Heading 1", "Heading 2",
+                       "Heading 3", "Heading 4", "Heading 5", "Heading 6",
+                       "Heading 7", "Heading 8", "Heading 9"]:
+        force_thai_font_on_style(doc, style_name)
+    print("Forced TH Sarabun New on Heading 1-9 + Normal + List Paragraph styles.")
 
     # Find insertion point (before "บรรณานุกรม" paragraph)
     insertion_point = find_insertion_point(doc)
