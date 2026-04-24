@@ -1,0 +1,60 @@
+graph TB
+    %% User Layer
+    subgraph UserLayer["User Layer"]
+        U1["LINE Official Account<br/>(นิสิต)"]
+        U2["Web Admin Portal<br/>(เจ้าหน้าที่)"]
+    end
+
+    %% Application Layer
+    subgraph AppLayer["Application Layer"]
+        A1["chat-api<br/>LINE webhook<br/>+ Agentic RAG"]
+        A2["ingest-worker<br/>Document<br/>processing (v2)"]
+        A3["admin-api<br/>Tenant mgmt<br/>+ analytics"]
+    end
+
+    %% Data Layer
+    subgraph DataLayer["Data Layer"]
+        D1[("Pinecone<br/>(vector store)")]
+        D2[("Firestore<br/>(tenant metadata)")]
+        D3[("Cloud Storage<br/>(raw documents)")]
+        D4[("Google Drive<br/>(source of truth)")]
+    end
+
+    %% External Services
+    subgraph External["External Services"]
+        E1["Anthropic Claude<br/>Opus 4.7 / Haiku 4.5"]
+        E2["Cohere<br/>Embed + Rerank"]
+        E3["GCP Secret Manager"]
+    end
+
+    %% Connections — user to app
+    U1 --> A1
+    U2 --> A3
+
+    %% App to data
+    A1 --> D1
+    A1 --> D2
+    A2 --> D1
+    A2 --> D4
+    A3 --> D3
+    A3 --> D2
+
+    %% App to external (dashed = API calls)
+    A1 -.-> E1
+    A1 -.-> E2
+    A2 -.-> E1
+    A2 -.-> E2
+    E3 -.-> A1
+    E3 -.-> A2
+    E3 -.-> A3
+
+    %% Styling
+    classDef userStyle fill:#FFF2CC,stroke:#2F5496,stroke-width:2px
+    classDef appStyle fill:#BDD7EE,stroke:#2F5496,stroke-width:2px
+    classDef dataStyle fill:#C6E0B4,stroke:#2F5496,stroke-width:2px
+    classDef extStyle fill:#E7E6E6,stroke:#2F5496,stroke-width:2px
+
+    class U1,U2 userStyle
+    class A1,A2,A3 appStyle
+    class D1,D2,D3,D4 dataStyle
+    class E1,E2,E3 extStyle

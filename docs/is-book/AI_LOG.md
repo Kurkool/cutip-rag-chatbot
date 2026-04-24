@@ -13,6 +13,155 @@ Format:
 
 ---
 
+## 2026-04-24 (session 19 — ch6 expanded to match พี่อู๋ structure + xlsx revised)
+- Task: draft, code
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch06-financial-feasibility.md` (rewrote — 8 sections → 13, +5 new matching อู๋'s TIP IS 2566)
+  - `cutip-rag-chatbot/docs/is-book/build_financial_model.py` (5 sheets → 9)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-Financial-Model.xlsx` (rebuilt 20K)
+- New ch6 sections:
+  - §6.1 สินทรัพย์ที่ใช้ในการประกอบธุรกิจ (asset list + depreciation schedule)
+  - §6.2 สมมติฐานการเงิน (centralized)
+  - §6.5 ประมาณการค่าใช้จ่ายในการขายและการบริหาร (SG&A breakdown)
+  - §6.7 งบแสดงฐานะทางการเงิน (Balance Sheet 3-year)
+  - §6.12 บทสรุปทางการเงิน (KPI summary)
+- Kept from original: Break-even + Sensitivity (not in อู๋'s but adds value)
+- xlsx additions: Assets, SG&A, BalanceSheet, Summary sheets. Sheet order follows ch6 flow. Cross-sheet formulas: Summary → BreakEven/P&L/CF/Assets; BalanceSheet → CashFlow/P&L.
+- Also: removed 80 transcript-citations `(ST-NN, line NN)` / `(S-NN, post-eva line NN)` from ch4 + ch5 (79 + 1) per user request. No double-space or orphan parenthesis left.
+
+---
+
+## 2026-04-24 (session 18 — Heading blue color fix + size 16 + Chula watermark)
+- Task: code
+- Files touched: `build_viriya_ithesis.py`, `VIRIYA-IS-staging.docx`
+- Blue heading fix: iThesis template sets `<w:color w:val="0F4761" w:themeColor="accent1" w:themeShade="BF"/>` on Heading 1-9. That's Word 2024's default Office theme accent1 = dark teal. Fixed by removing `<w:color>` element from rPr during `force_thai_font_on_style` — headings fall back to auto (black).
+- Heading uniform size + bold: all Heading 1-9 now TH Sarabun New 16pt bold (was 20/16/14pt with no explicit bold). Visual hierarchy via bold instead of size. `force_thai_font_on_style` gained `bold=True` param that adds `<w:b/>` + `<w:bCs/>`.
+- Chula watermark: added `add_chula_watermark()` that inserts `background-img.jpg` (111K, Chula emblem seal) into section 0 header as behind-text anchored drawing. Only section 0 needed — other 16 sections inherit via header-linking (all `is_linked_to_previous=True`).
+  - Technique: `run.add_picture()` creates inline → rewrite `<wp:inline>` to `<wp:anchor behindDoc="1"` via lxml. `positionH/positionV=center relativeFrom=page` centers watermark on every page, `wrapNone` lets body text overlay.
+  - Width 4 inches; image relationship handled by python-docx.
+  - File size 622K → 667K.
+
+---
+
+## 2026-04-24 (session 17 — Revert Thai Distributed + enable SEQ fields for TOC auto-population)
+- Task: code
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/build_viriya_ithesis.py` (removed `set_thai_distribute()` calls from create_*_para; added `create_caption_para()` that emits SEQ field; updated `create_figure_paragraphs`; added table-caption detection `"ตารางที่ X.Y ..."` in markdown parser)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS-staging.docx` (rebuilt — 5 figure SEQ + 23 table SEQ fields)
+- Rationale: (1) Thai distributed alignment caused visual issues; revert to default left-justified body text. (2) iThesis template has 3 TOC fields pre-built: main (TOC \o "1-3"), tables (TOC \c "ตารางที่"), figures (TOC \c "ภาพที่"). The `\c` switch requires SEQ fields with matching identifier — added them.
+- Caption implementation:
+  - `create_caption_para(doc, label, title)` emits `<w:p>` with: run "label ", `<w:fldSimple w:instr=" SEQ {label} \* ARABIC ">`, run " title"
+  - Figure captions: `create_figure_paragraphs` calls `create_caption_para("ภาพที่", caption)`
+  - Table captions: regex `^ตารางที่\s+[\d.]+\s+(.+)$` in markdown parser → extracts title → `create_caption_para("ตารางที่", title)`
+- On F9 refresh in Word: SEQ fields auto-number globally (ภาพที่ 1..5, ตารางที่ 1..23). User loses the chapter-based hardcoded "2.1 / 4.1" numbering from markdown — this is the tradeoff for auto-TOC. Chapter-based would need STYLEREF + SEQ reset (more complex).
+- User workflow post-build: open docx → F9 on main TOC → F9 on สารบัญตาราง → F9 on สารบัญรูปภาพ
+
+---
+
+## 2026-04-24 (session 16 — Auto-format body to TH Sarabun 16pt + Thai Distributed)
+- Task: code
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/build_viriya_ithesis.py` (+size_pt param to `force_thai_font_on_style`; +`set_thai_distribute()` helper; +`_ensure_pPr()`; call inline on create_normal/bullet/number_para)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS-staging.docx` (rebuilt)
+- Rationale: User frustrated with manually setting font+size+alignment per paragraph in Word. Auto-apply Chula academic standard so no manual formatting needed.
+- Applied:
+  - Normal + List Paragraph: TH Sarabun New 16pt via style rPr (`w:sz val=32, w:szCs val=32`)
+  - Body + bullet + numbered paragraphs: `w:jc val=thaiDistribute` inline (via `set_thai_distribute`)
+  - Headings 1-9: font forced to TH Sarabun New, size kept from iThesis template default
+  - Table cells: inherit Normal 16pt, alignment left (no inline jc — thaiDistribute in narrow cells splits 2-3 words weirdly)
+  - Template paragraphs (cover, approval, TOC, abstract): not touched — iThesis controls those
+- Verify: 429 of 644 paragraphs in docx have thaiDistribute alignment; Normal style rPr shows sz=32 (16pt) correctly
+
+---
+
+## 2026-04-24 (session 15 — Rewrite ch4 quotes to summary)
+- Task: polish, paraphrase
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch04-results.md` (converted 50+ direct verbatim quotes to paraphrased summary)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS-staging.docx` (rebuilt 620K)
+- Rationale: User wanted summarized/paraphrased writing instead of verbatim quotes pasted directly from transcripts. More academic + cleaner reading.
+- Scope: 4.1.1 (staff), 4.1.2 (students), 4.3.1 (chatbot eval), 4.3.2 (admin portal), 4.3.3 (staff post-eva), 4.3.4 (UTAUT student interview)
+- Pattern applied: keep `(S-XX, line XX)` / `(ST-XX, post-eva line XX)` citations for traceability; rephrase quoted text into indirect speech ("ผู้ให้สัมภาษณ์ S-XX ระบุว่า..."); preserve facts/numbers/reasoning exactly
+- R3 (raw data integrity) upheld: source transcripts untouched; only manuscript body paraphrased
+- R5 (deep paraphrase): restructured sentence-level, not just swapping a few words
+- 4 remaining quotes are acceptable: proper nouns ("Principles of Innovation", "อาคารจามจุรี 10") or brief emphasis words ("ส่วนเสริม", "CU TIP Assistant")
+
+---
+
+## 2026-04-24 (session 14 — Migrate fig 3.2 + 4.2 to Mermaid)
+- Task: code, refactor
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/figures/mermaid/fig_3_2_system_architecture.mmd` (new)
+  - `cutip-rag-chatbot/docs/is-book/figures/mermaid/fig_4_2_detailed_architecture.mmd` (new)
+  - `cutip-rag-chatbot/docs/is-book/build_figures.py` (+render_mermaid() via npx, removed matplotlib fig_3_2/4_2)
+  - `cutip-rag-chatbot/docs/is-book/figures/generated/fig_3_2_system_architecture.png` (re-rendered via mermaid)
+  - `cutip-rag-chatbot/docs/is-book/figures/generated/fig_4_2_detailed_architecture.png` (re-rendered via mermaid)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS-staging.docx` (rebuilt 622K)
+- Rationale: User complained matplotlib diagrams had arrows crossing through boxes. Mermaid uses dagre layout engine → auto-orthogonal routing → no crossings.
+- Render pipeline: `npx -y @mermaid-js/mermaid-cli` (one-time download, no global install). Timeout 120s, shell=True on Windows.
+- Color palette preserved: yellow=user/channels, blue=app/services, green=data, grey=external. Subgraphs for layers with labels.
+- fig 3.2: 3-layer (User/App/Data) + External Services in subgraph
+- fig 4.2: 4 subgraphs (Channels / Cloud Run / Data Stores / External Services)
+
+---
+
+## 2026-04-24 (session 13 — Generate 5 figure PNGs + embed in docx)
+- Task: code, build
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/build_figures.py` (new — matplotlib figure generator)
+  - `cutip-rag-chatbot/docs/is-book/figures/generated/fig_2_1_conceptual_framework.png`
+  - `cutip-rag-chatbot/docs/is-book/figures/generated/fig_3_1_methodology_phases.png`
+  - `cutip-rag-chatbot/docs/is-book/figures/generated/fig_3_2_system_architecture.png`
+  - `cutip-rag-chatbot/docs/is-book/figures/generated/fig_4_2_detailed_architecture.png`
+  - `cutip-rag-chatbot/docs/is-book/figures/generated/fig_4_3_evolution_timeline.png`
+  - `cutip-rag-chatbot/docs/is-book/build_viriya_ithesis.py` (+FIGURE_MAP + create_figure_paragraphs + regex hook in parser)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS-staging.docx` (rebuilt 685K, +5 inline images)
+- Thai rendering via matplotlib `FontProperties(family='TH Sarabun New')`. Used ascii arrows (->) instead of Unicode → because glyph 8594 missing from TH Sarabun New.
+- Figures render at 180 dpi, 6 inches wide in docx (Inches(6.0)), centered + italic caption below
+- UI screenshots (Admin Portal + LINE bot) still user-owed — those go in `figures/user-captured/`
+- Installed matplotlib 3.10.8 + contourpy/cycler/kiwisolver into `.venv/`
+
+---
+
+## 2026-04-24 (session 12 — Financial model xlsx)
+- Task: code, build
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/build_financial_model.py` (new — openpyxl builder)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-Financial-Model.xlsx` (new — 14K, 5 sheets with live Excel formulas)
+- Sheets: Assumptions (yellow input cells), P&L 3-yr, CashFlow 3-yr, BreakEven, Sensitivity (worst/base/best)
+- All P&L / Cash Flow / Break-even / Sensitivity cells are formulas referencing Assumptions — user edits yellow cells → everything recalculates automatically
+- Verification: base-case formulas match ch6 table 6.7 within ~222 THB rounding error (due to Cohere Embed 0.42 THB swallowed in ch6's "~2,580")
+- Tenant averaging uses start + growth*6.5 (mid-year) not simple (start+end)/2 — matches ch6 convention (Y1=13, Y2=37, Y3=54.5)
+- Tax uses MAX(0, EBT*rate) to avoid negative tax when EBT<0
+- Thai rendering: TH Sarabun New 14pt on all cells; header 16pt bold
+
+---
+
+## 2026-04-24 (session 11 — TAM → UTAUT migration for student evaluation)
+- Task: draft, rewrite, export
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/manuscript/verified-refs.ris` (+Venkatesh 2003 UTAUT as RecNum 14 → 14 total refs)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch01-introduction.md` (RQ3, Obj 4, glossary +UTAUT)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch02-literature-review.md` (new §2.5.3 UTAUT, updated 2.7 conceptual framework)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch03-methodology.md` (3.2.3.1 / 3.2.3.3 / 3.2.3.4 — rewrote student eval as UTAUT interview; §3.2.3.2.3 data collection)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch04-results.md` (§4.3.4 fully rewritten as N=6 UTAUT in-depth interview with PE/EE/SI/FC/BI constructs; §4.3.5 synthesis updated)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch05-business-feasibility.md` (lines 45, 69, 176 — adoption signals now qualitative UTAUT not TAM mean scores)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/ch07-conclusion.md` (§7.1 RQ3 answer, §7.2.1 discussion citing Venkatesh 2003, §7.3 limitations, §7.5 future work)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/frontmatter.md` (TH + EN abstract rewritten; acknowledgements "ตอบแบบสอบถาม" → "สัมภาษณ์เชิงลึกทั้งก่อนและหลัง"; TOC appendix ก renamed)
+  - `cutip-rag-chatbot/docs/is-book/manuscript/backmatter.md` (Appendix ก fully replaced: 31-item TAM Likert questionnaire → 18-question UTAUT interview guide in 4 parts + rationale note for qualitative UTAUT)
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS-staging.docx` (rebuilt 132K)
+- Rationale: post-evaluation Google Form response file (CUTIP RAG Final (Responses).xlsx) only had 6 respondents. N=6 is too small for quantitative TAM (cannot run inferential statistics, Likert means unreliable). User switched to qualitative UTAUT in-depth interview approach — captures depth + rationale per participant, matches Braun & Clarke 2006 thematic analysis methodology already in use for Phase 1 interviews. UTAUT chosen over base TAM because it covers Social Influence + Facilitating Conditions (relevant in student peer/senior context + need for staff escalation when bot can't answer).
+- References verified: Venkatesh, V., Morris, M.G., Davis, G.B., & Davis, F.D. (2003). User acceptance of information technology: Toward a unified view. MIS Quarterly, 27(3), 425-478. https://doi.org/10.2307/30036540
+- Notes / decisions:
+  - UTAUT deductive coding: all 5 constructs (PE, EE, SI, FC, BI) + moderator age/gender/experience
+  - 18 interview questions (part 1: background 3Q, part 2: overall bot impression 4Q, part 3: UTAUT 8Q, part 4: closing 3Q)
+  - 6 participants: ST-01 จีน, ST-02 เอ๋, ST-04 ดรีม, ST-05 พี่แป้ง, ST-06 พี่โม, ST-07 พีท (all Thai TIP students)
+  - Adjacent appendix ค (staff interview) unchanged — that's a separate N=2 evaluation
+  - TAM references retained in ch02 §2.5.1-2.5.2 (literature review context) and ch07 §7.2.1 (citing Davis 1989 as origin of theory that UTAUT extends)
+- [TBD:] markers remaining: ST-04/05/07 occupation details (user must fill from raw data)
+
+---
+
 ## 2026-04-23 (session 10 — TIP-aligned framework expansion)
 - Task: draft (add standard TIP-expected frameworks to ch5 + ch6)
 - Files touched:

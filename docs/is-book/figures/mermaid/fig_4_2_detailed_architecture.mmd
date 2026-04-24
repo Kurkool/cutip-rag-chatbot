@@ -1,0 +1,71 @@
+graph TB
+    %% Channels (user-facing)
+    subgraph Channels["Channels"]
+        LINE["LINE Official Account<br/>(นิสิตส่งข้อความ)"]
+        WEB["Web Browser<br/>(เจ้าหน้าที่เข้า Admin Portal)"]
+    end
+
+    %% Cloud Run Services
+    subgraph CloudRun["Cloud Run (asia-southeast1)"]
+        CHAT["chat-api<br/>LINE webhook<br/>Agentic RAG<br/>Python FastAPI"]
+        INGEST["ingest-worker<br/>Universal v2<br/>Opus 4.7 parse<br/>Python FastAPI"]
+        ADMIN["admin-api<br/>Tenant mgmt<br/>Backup<br/>Python FastAPI"]
+        PORTAL["admin-portal<br/>Next.js 16<br/>React + shadcn"]
+    end
+
+    %% Data Stores
+    subgraph DataStores["Data Stores"]
+        PC[("Pinecone<br/>university-rag<br/>1536d, cosine")]
+        FS[("Firestore (default)<br/>tenants, logs")]
+        CS[("Cloud Storage<br/>backup buckets")]
+        GD[("Google Drive<br/>Tenant folder")]
+    end
+
+    %% External Services
+    subgraph External["External Services"]
+        ANTH["Anthropic API<br/>Claude Opus 4.7<br/>Claude Haiku 4.5"]
+        COHERE["Cohere API<br/>Embed v4.0 (1536d)<br/>Rerank v3.5"]
+        LINEAPI["LINE Messaging<br/>Channel API"]
+        SM["GCP Secret Manager<br/>API keys"]
+    end
+
+    %% Channel connections
+    LINE --> CHAT
+    WEB --> PORTAL
+    PORTAL --> ADMIN
+
+    %% chat-api connections
+    CHAT --> PC
+    CHAT --> FS
+    CHAT -.-> ANTH
+    CHAT -.-> COHERE
+    CHAT -.-> LINEAPI
+
+    %% ingest-worker connections
+    INGEST --> PC
+    INGEST --> GD
+    INGEST --> FS
+    INGEST -.-> ANTH
+    INGEST -.-> COHERE
+
+    %% admin-api connections
+    ADMIN --> FS
+    ADMIN --> CS
+    ADMIN --> PC
+    ADMIN --> GD
+
+    %% Secret Manager provides API keys
+    SM -.-> CHAT
+    SM -.-> INGEST
+    SM -.-> ADMIN
+
+    %% Styling
+    classDef chStyle fill:#FFF2CC,stroke:#2F5496,stroke-width:2px
+    classDef appStyle fill:#BDD7EE,stroke:#2F5496,stroke-width:2px
+    classDef dataStyle fill:#C6E0B4,stroke:#2F5496,stroke-width:2px
+    classDef extStyle fill:#E7E6E6,stroke:#2F5496,stroke-width:2px
+
+    class LINE,WEB chStyle
+    class CHAT,INGEST,ADMIN,PORTAL appStyle
+    class PC,FS,CS,GD dataStyle
+    class ANTH,COHERE,LINEAPI,SM extStyle
