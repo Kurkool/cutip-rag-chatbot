@@ -13,6 +13,26 @@ Format:
 
 ---
 
+## 2026-04-25 (session 20 — appendix headings centered + iThesis cache nuke)
+- Task: code, other (iThesis troubleshoot)
+- Files touched:
+  - `cutip-rag-chatbot/docs/is-book/build_viriya_ithesis.py` — `create_heading_para` now returns list; appendix level-2 case emits [separator_para with sectPr vAlign=top, heading_para with sectPr vAlign=center]. New helper `_clone_sectpr_base(doc, v_align)` deepcopies body final sectPr (pgSz/pgMar/cols/docGrid) + inserts nextPage type + vAlign. `pageBreakBefore=false` override on appendix Heading 1 prevents double break (section break already handled page boundary).
+  - `cutip-rag-chatbot/docs/is-book/VIRIYA-IS-staging.docx` — rebuilt, 8 appendices × 2 sectPrs = 16 new vAlign sectPrs verified in document.xml.
+- Output verified: each appendix ก-ซ heading renders on own page, centered horizontally (Heading 1 style) + vertically (section vAlign=center), with soft break splitting "ภาคผนวก X" and title onto 2 lines; body content starts on next page.
+- iThesis upload troubleshooting (off-manuscript):
+  - Diagnosed `URIError: URI malformed` in `getCookie` → cookie corruption; cascade causes `committeeList is not defined` + `Cannot read 'sort' of undefined` + silent upload failure (add-in UI shows "complete" but POST never reaches server because `getToken()` throws).
+  - Nuked Office/IE/WebView caches on this machine: Wef, WebServiceCache, OfficeFileCache, BackstageInAppNavCache, MruServiceCache, SmartLookupCache, ResourceInfoCache, DocumentActivityQueue, INetCache, INetCookies — ~22 MB total. WebCache locked by Windows Search service (left partial).
+  - EdgeWebView\User Data path doesn't exist on this machine (runtime installed but user data at different location). Not a blocker.
+  - Procedure captured in SESSION-HANDOFF.md "Cookie/auth corruption" gotcha section + memory feedback file for future reuse.
+- Keywords proposed (not yet added to frontmatter.md — awaiting user confirmation):
+  - TH: Retrieval-Augmented Generation; ปัญญาประดิษฐ์เชิงตัวแทน (Agentic AI); แชทบอทให้บริการนิสิต; ทฤษฎี UTAUT; การวิเคราะห์ความเป็นไปได้ทางธุรกิจ
+  - EN: Retrieval-Augmented Generation (RAG); Agentic AI Chatbot; Multi-tenant SaaS; UTAUT Framework; Business Feasibility Analysis
+- Notes / decisions:
+  - SESSION-HANDOFF.md rewritten for 2026-04-25 state — covers entire manuscript done, staging docx formatting decisions, iThesis submission gotchas, keyword proposal, restart guide.
+  - EndNote import steps + Update Citations procedure reiterated (RIS Reference Manager filter, UTF-8 encoding, APA 7th style).
+
+---
+
 ## 2026-04-24 (session 19 — ch6 expanded to match พี่อู๋ structure + xlsx revised)
 - Task: draft, code
 - Files touched:

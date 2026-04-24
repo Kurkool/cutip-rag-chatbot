@@ -2,153 +2,166 @@
 
 Use this file to pick up work on a new session or computer.
 
-## Status snapshot (as of 2026-04-22 end of D2)
+## Status snapshot (as of 2026-04-25)
 
-**Deadline:** ศุกร์ 2026-04-24 (2 days left after D2)
+**Original deadline:** ศุกร์ 2026-04-24 — manuscript complete, now in iThesis submission phase.
 
-### Done (~64 pages of body text + toolchain)
+### Done — entire manuscript + staging docx + supporting artifacts
 
-| บท | สถานะ | ขนาด | ไฟล์ |
+| บท | สถานะ | ไฟล์ |
+|---|---|---|
+| 1 บทนำ | ✅ | `manuscript/ch01-introduction.md` |
+| 2 ทบทวนวรรณกรรม | ✅ (+ §2.5.3 UTAUT) | `manuscript/ch02-literature-review.md` |
+| 3 วิธีการดำเนินการวิจัย | ✅ (UTAUT methodology) | `manuscript/ch03-methodology.md` |
+| 4 ผลการวิจัย | ✅ (§4.3.4 UTAUT N=6 interview) | `manuscript/ch04-results.md` |
+| 5 ความเป็นไปได้เชิงธุรกิจ | ✅ (PESTEL + 5F + STP + 7Ps, pricing 6500/15000/32500) | `manuscript/ch05-business-feasibility.md` |
+| 6 ความเป็นไปได้ทางการเงิน | ✅ (5yr + loan 1M@5%, NPV 4.25M, IRR 37%, MIRR 27.13%) | `manuscript/ch06-financial-feasibility.md` |
+| 7 สรุปผล | ✅ (RQ3 + UTAUT/Venkatesh discussion) | `manuscript/ch07-conclusion.md` |
+| front matter | ✅ (TH+EN abstract UTAUT) | `manuscript/frontmatter.md` |
+| back matter | ✅ (ก UTAUT, ข in-depth, ค post-eva, ง-ฉ existing, ช Thematic Analysis, ซ Financial) | `manuscript/backmatter.md` |
+| docx export | ✅ `VIRIYA-IS-staging.docx` (~11 MB) | `build_viriya_ithesis.py` |
+| financial xlsx | ✅ (10 sheets, live PMT/NPV/IRR/MIRR formulas) | `build_financial_model.py` |
+| thematic analysis xlsx | ✅ (6 sheets, 25 codes, 40 excerpts, 10 themes, Braun & Clarke 6-phase) | `build_thematic_analysis.py` |
+| figures | ✅ 5 auto (matplotlib + Mermaid) + 6 user-captured | `figures/generated/` + `figures/user-captured/` |
+| verified-refs.ris | ✅ 19 refs (+ Venkatesh 2003, MHESI, Grand View, NDESC, Botnoi, ZWIZ) | `manuscript/verified-refs.ris` |
+
+### Currently pending (iThesis submission phase)
+
+| Task | Blocker | Owner |
+|---|---|---|
+| iThesis cover/approval/abstract via add-in UI | user fills via form | user |
+| iThesis committee list (blocked upload — `committeeList is not defined` error) | user fills | user |
+| EndNote refs.ris import + Update Citations | user runs in Word | user |
+| F9 refresh TOC + List of Figures + List of Tables | user runs in Word | user |
+| Keywords TH/EN (proposed below, not yet added to frontmatter.md) | user confirms or modifies | user |
+| Upload to iThesis system | cookie/auth issue (see gotcha below) | user |
+
+## Proposed keywords (add to frontmatter.md abstract)
+
+**คำสำคัญ:** Retrieval-Augmented Generation; ปัญญาประดิษฐ์เชิงตัวแทน (Agentic AI); แชทบอทให้บริการนิสิต; ทฤษฎี UTAUT; การวิเคราะห์ความเป็นไปได้ทางธุรกิจ
+
+**Keywords:** Retrieval-Augmented Generation (RAG); Agentic AI Chatbot; Multi-tenant SaaS; UTAUT Framework; Business Feasibility Analysis
+
+## Build pipeline (rebuild staging docx from manuscript .md)
+
+```bash
+cd cutip-rag-chatbot/
+.venv/Scripts/python.exe docs/is-book/build_viriya_ithesis.py
+# → docs/is-book/VIRIYA-IS-staging.docx
+# Fallback VIRIYA-IS-staging-v2.docx if primary is locked in Word
+```
+
+Builder does: open `VIRIYA-iThesis-Template.docx` → force TH Sarabun New 16pt + centered Heading 1 + set black on Heading 1-9 (override template's Aptos + blue accent1) → inject chapters before บรรณานุกรม anchor → replace template appendix placeholders (iThesisIndex2) with backmatter content → apply Thai lang/layout tags on every run → remove คำอธิบายสัญลักษณ์ empty section → save.
+
+## Staging docx — key formatting decisions baked in
+
+- **TH Sarabun New 16pt** forced on Normal/List Paragraph/Heading 1-9 via `force_thai_font_on_style` (overrides Word 2024 Aptos theme).
+- **Heading 1 centered + `pageBreakBefore`** — chapters + appendix label pages.
+- **Italic removed from Heading 4/6/8** (template default).
+- **Blue `accent1` (#0F4761) removed** from all heading levels — default black rendering.
+- **Thai Distributed dropped** — root cause was `eastAsia="th-TH"` (CJK tag, wrong). Removed. Keep `w:val="th-TH"` + `w:bidi="th-TH"` only.
+- **useAsianBreakRules** compat flag in `word/settings.xml` — preserves Thai grapheme clusters when breaking lines.
+- **SEQ field complex form** (begin/separate/end + `w:dirty="true"` + document-level `updateFields=true`) — figure/table captions auto-number on F9 refresh.
+- **Appendix headings**: each appendix heading is alone in its own section with `<w:sectPr vAlign="center" type="nextPage"/>` → centered both H+V on a divider page; a separator paragraph before each heading has `vAlign="top"` to prevent the preceding section from also being centered; `pageBreakBefore=false` override on appendix Heading 1 to avoid double page break.
+- **Watermark** Chula logo from `background-img.jpg` added to all headers.
+
+## Supporting xlsx artifacts
+
+- `build_financial_model.py` → `viriya-financial-model.xlsx` — 10 sheets (Assumptions, Loan amort, Assets, SG&A, P&L, CashFlow, BalanceSheet, BreakEven, Sensitivity, Summary). All formulas live — change an assumption, all downstream sheets recompute. Base case: NPV 4.25M, IRR 37%, MIRR 27.13%, Payback 2.78 years.
+- `build_thematic_analysis.py` → `viriya-thematic-analysis.xlsx` — 6 sheets (Overview, 12 Participants, 25-code Codebook (14 UTAUT + 11 inductive), 40 Excerpts, 10 Themes, Braun & Clarke 6-phase log). Appendix ช has a summary table referencing this xlsx.
+
+## iThesis submission — gotchas
+
+### Cookie/auth corruption (`URIError: URI malformed` in `getCookie`)
+
+The iThesis Next Gen Word add-in stores its auth cookie in Office's WebView/IE cache. When the cookie becomes corrupted (partial write, truncated token, mismatched encoding), *every* add-in API call fails silently — `getCookie()` throws `URIError: URI malformed` on `decodeURIComponent`, cascading into `committeeList is not defined`, `Cannot read 'sort' of undefined`, etc. The "Upload complete" toast can lie — the underlying POST never reached the server because `getToken()` threw before the request was even built.
+
+**Symptoms:** upload "completes" in add-in but nothing appears in the web portal; committee dropdown empty; no errors shown to user unless DevTools console is open.
+
+**Fix (tried and verified pattern):**
+
+```powershell
+# Kill all Office
+taskkill /F /IM WINWORD.EXE
+taskkill /F /IM msoadfsb.exe
+# Nuke caches (safe — all are recreated on next launch)
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Microsoft\Office\16.0\Wef"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Microsoft\Office\16.0\WebServiceCache"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Microsoft\Office\16.0\OfficeFileCache"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Microsoft\Windows\INetCache"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Microsoft\Windows\INetCookies"
+# EdgeWebView User Data sometimes doesn't exist — that's fine, skip
+```
+
+Then reopen Word → iThesis tab → fresh login to CU account.
+
+If the error persists: open DevTools in the iThesis pane (F12 / right-click Inspect) → Application tab → Storage → Clear site data → reload pane.
+
+### Upload ≠ Submit
+
+"Upload" in the add-in sends the file as draft to the server. Document does NOT appear in the advisor's queue until user explicitly clicks **ส่งเล่ม / Submit for Approval** on the web portal (https://ithesis.grad.chula.ac.th). Check portal → My Thesis → status should be `Pending Advisor Review` after submit.
+
+## Source data locations (read-only per R3)
+
+```
+IS-related/IS-Data/
+├── indepth-interview/transcript/ (8 files: 4 staff + 3 student + 2 multi-part)
+│   └── question-set/
+├── evaluation/
+│   ├── project-eva/VIRIYA RAG EVALUATION.xlsx (N=2 filled: ธารา + พี่แมน)
+│   └── post-evaluation-interview/
+│       ├── transcript/ (3 files: staff post-eva + 6 UTAUT student transcripts elsewhere)
+│       └── post-eva-question-set/
+└── [raw .m4a audio — cannot process directly]
+```
+
+## Anonymization codes (12 participants total)
+
+| Code | Group | Program | Where |
 |---|---|---|---|
-| 1 บทนำ | ✅ | ~7 pages / 9.4K chars | `manuscript/ch01-introduction.md` |
-| 2 ทบทวนวรรณกรรม | ✅ | ~11 pages / 14.2K chars | `manuscript/ch02-literature-review.md` |
-| 3 วิธีการดำเนินการวิจัย | ✅ | ~11 pages / 15.4K chars | `manuscript/ch03-methodology.md` |
-| 4 ผลการทำวิจัย (4.1 + 4.2 + 4.3) | ✅ | ~35 pages / 45.5K chars | `manuscript/ch04-results.md` |
-| EndNote workflow | ✅ validated | — | `endnote-sample/` |
-| docx rendering | ✅ validated (user confirmed) | — | `IS-book-thai-test.docx` |
-| verified-refs.ris | ✅ 13 refs | — | `manuscript/verified-refs.ris` |
+| S-01 | Staff (ธารา) | TIP | ch4.1 + ch4.3 |
+| S-02 | Staff (ศิมาพร) | HSM | ch4.1 |
+| S-03 | Staff (พี่จิ๋ว/วรัญญา) | HSM | ch4.1 |
+| S-04 | Staff (พี่แหวน) | วิทยาศาสตร์สิ่งแวดล้อม | ch4.1 |
+| S-05 | Staff (พี่แมน) | TIP | ch4.3 (evaluator #2) |
+| ST-01 | Student (จีน — มนทนา) | TIP | ch4.1 + ch4.3.4 UTAUT |
+| ST-02 | Student (เอ๋ — พรทิพย์) | TIP | ch4.1 + ch4.3.4 UTAUT |
+| ST-03 | Student (ปุ้ย — นัดนลี) | TIP | ch4.1 |
+| ST-04 | Student (ดรีม) Business Analyst | TIP | ch4.3.4 UTAUT |
+| ST-05 | Student (พี่แป้ง) วิศวกร | TIP | ch4.3.4 UTAUT |
+| ST-06 | Student (พี่โม) | TIP | ch4.3.4 UTAUT |
+| ST-07 | Student (พีท) ธุรกิจส่วนตัว | TIP | ch4.3.4 UTAUT |
 
-### Pending
+## Verified refs (19 in verified-refs.ris)
 
-| บท | สถานะ | ประมาณหน้า | Blocker |
-|---|---|---|---|
-| 5 ความเป็นไปได้เชิงธุรกิจ | ⏳ | 14-18 | **5 unlock Qs from user (see below)** |
-| 6 ความเป็นไปได้ทางการเงิน | ⏳ | 8-12 | **Q4-5 from user (see below)** |
-| 7 สรุปผลและข้อเสนอแนะ | ⏳ | 8-10 | needs ch 5-6 done |
-| front matter | ⏳ | 10+ | ปก/อนุมัติ/บทคัดย่อ TH+EN/กิตติกรรม/สารบัญ |
-| back matter | ⏳ | 20+ | บรรณานุกรม (EndNote auto) + ภาคผนวก + ประวัติ |
-| docx export | ⏳ D3 last step | 1 | python-docx pipeline |
+Core academic (14): Lewis 2020, Davis 1989, Bezemer & Zaidman 2010, Creswell & Plano Clark 2018, Braun & Clarke 2006, Vaswani 2017, Karpukhin 2020, Gao 2024, Venkatesh & Davis 2000, Anthropic 2024, Nogueira & Cho 2019, Robertson & Zaragoza 2009, Labadze 2023, **Venkatesh 2003** (UTAUT).
 
-## 5 Unlock Questions — STILL PENDING USER
-
-### บท 5 (business feasibility)
-
-1. **Pricing tiers** — Starter/Pro/Enterprise rates + differentiation
-   - Hint from ch4.3: S-05 (พี่แมน) prefers weighted-per-student, NOT flat rate. Can use as design starting point.
-2. **Competitors** — Thai university chatbot vendors (Mindana? Skooldio? Botnoi? Zwiz AI?) or "Claude, please research"
-3. **Market size** — number of Thai universities/programs (claude can WebSearch)
-
-### บท 6 (financial feasibility)
-
-4. **Monthly cost** — GCP + Anthropic + Pinecone + Cohere (per-tenant or total; ballpark OK)
-5. **Initial investment** — person-months + sunk cost
-
-**Partial answers already captured in ch4.3:**
-- S-05 explicitly declined specific WTP rate → defers to ผอ.หลักสูตร
-- Buying center confirmed: ผอ. หลักสูตร (all 4 staff unanimous in ch4.1)
-- Time saved estimates: S-01 16-17 hr/week, S-05 ลดครึ่ง (4→2 hr/day)
-- TIP TA outsource rate: ~19K/month (from ch4.1 Table 4.3)
-
-## User also owes (non-blocking)
-
-- **Screenshots:** Admin Portal (Dashboard, Chat Logs, Analytics, Upload) + LINE bot Q&A examples → `docs/is-book/figures/user-captured/`
-- **N evaluator final:** xlsx has N=2 filled (ธารา + พี่แมน) + 1 template sheet — if a 3rd evaluator comes, tables scale easily
+Public market/industry refs for ch5 (5): MHESI (กระทรวงการอุดมศึกษาฯ 2566), Grand View Research 2567, NDESC (สำนักงานสภาพัฒนาการเศรษฐกิจฯ), Botnoi Group 2569, ZWIZ.AI 2569.
 
 ## How to restart on a new session/computer
 
-1. **Read these first in order:**
+1. **Read in order:**
    - `docs/is-book/CLAUDE.md` — R1-R11 hard rules (MUST follow)
-   - `docs/is-book/AI_LOG.md` — 6 sessions logged so far
-   - `docs/superpowers/specs/2026-04-21-is-book-design.md` — overall design
+   - `docs/is-book/AI_LOG.md` — session history (13+ sessions through 2026-04-25)
    - This file (SESSION-HANDOFF.md)
-   - `cutip-rag-chatbot/CLAUDE.md` — project-level rules + tenant/toolchain notes
+   - `cutip-rag-chatbot/CLAUDE.md` — project-level rules
 
 2. **Verify environment:**
    ```bash
    cd cutip-rag-chatbot
-   git log --oneline -15   # expect commits through d0bf343 or later
-   .venv/Scripts/python.exe -c "import docx; print('docx:', docx.__version__)"
-   ls ../IS-related/IS-Data/indepth-interview/transcript/  # 9 files
-   ls ../IS-related/IS-Data/evaluation/post-evaluation-interview/transcript/  # 3 files
+   git status && git log --oneline -10
+   .venv/Scripts/python.exe -c "import docx, openpyxl, matplotlib; print('ok')"
+   ls docs/is-book/manuscript/        # 7 ch + front + back + .ris
+   ls docs/is-book/figures/generated/ # 5 auto figures
+   ls docs/is-book/figures/user-captured/ # 6 user screenshots (4.4-4.9)
    ```
 
-3. **Re-confirm unlock status with user** before starting ch 5-6:
-   - Q1 Pricing tiers, Q2 Competitors, Q3 Market size, Q4 Monthly cost, Q5 Initial investment
+3. **Rebuild staging docx:**
+   ```bash
+   .venv/Scripts/python.exe docs/is-book/build_viriya_ithesis.py
+   ```
 
-4. **If user gives green light to use research-backed defaults:**
-   - WebSearch for Thai higher-ed chatbot market
-   - Reference GCP pricing + Anthropic Claude API + Pinecone + Cohere rate cards
-   - Flag every estimate with `[USER-VERIFY: rationale]` marker
-
-## Source data locations
-
-### Read-only raw (R3 — never modify)
-
-```
-IS-related/
-├── CUTIP RAG Final (Responses).xlsx               ← TAM survey N=6
-├── CU TIP IS Proposal Template...pdf
-├── thesis_handbook.pdf                             ← Chula format spec
-├── ตัวอย่าง IS พี่อู๋.pdf                         ← voice reference
-├── Chula_Reference APA7thupdate_23สค64.pdf        ← APA 7 guide
-└── IS-Data/
-    ├── indepth-interview/
-    │   ├── transcript/ (9 .txt)                    ← 4 staff + 3 student + 2 multi-part
-    │   ├── question-set/ (2 .docx)
-    │   └── raw-mp4a/ (9 .m4a audio — cannot process directly)
-    └── evaluation/
-        ├── project-eva/VIRIYA RAG EVALUATION.xlsx
-        │   sheets: ธารา (filled), ธารา admin (filled), พี่แมน (filled), พี่แมน admin (filled), template 3, template 3
-        └── post-evaluation-interview/
-            ├── post-eva-question-set/ (1 .docx, 13 Qs)
-            ├── raw-mp4a/ (3 .m4a)
-            └── transcript/ (3 .txt — ธารา + พี่แมน part 1 + part 2)
-```
-
-### Thesis source docs (for ch1-3, 7)
-
-```
-cutip-rag-chatbot/docs/
-├── thesis-project-detail.md    ← 1696 lines / 24 sections
-├── architecture.md             ← 733 lines / 13 sections
-├── logo/                       ← VIRIYA SVGs for cover
-└── is-book/                    ← this workspace
-    ├── CLAUDE.md
-    ├── AI_LOG.md
-    ├── SESSION-HANDOFF.md (this file)
-    ├── endnote-sample/
-    └── manuscript/
-        ├── verified-refs.ris   (13 refs)
-        ├── ch01-introduction.md
-        ├── ch02-literature-review.md
-        ├── ch03-methodology.md
-        └── ch04-results.md
-```
-
-## Anonymization codes in use
-
-| Code | Group | Program | Where used |
-|---|---|---|---|
-| S-01 | Staff (ธารา) | TIP (CUTIP) | ch4.1 in-depth + ch4.3 post-eva |
-| S-02 | Staff (ศิมาพร) | HSM | ch4.1 only |
-| S-03 | Staff (พี่จิ๋ว/วรัญญา) | HSM | ch4.1 only |
-| S-04 | Staff (พี่แหวน) | วิทยาศาสตร์สิ่งแวดล้อม | ch4.1 only |
-| **S-05** | Staff (พี่แมน) | TIP | **ch4.3 only — evaluator #2** |
-| ST-01 | Student (จีน — Thai) | TIP | ch4.1 |
-| ST-02 | Student (เอ๋) | TIP | ch4.1 |
-| ST-03 | Student (ปุ้ย) | TIP | ch4.1 |
-
-**All 3 students Thai. No international students interviewed.** Visa context in ch4.1 relates to HSM program demographic (via S-02), not interview cohort.
-
-## Voice calibration reference
-
-Match ตัวอย่าง IS พี่อู๋.pdf (2023 TIP graduate):
-- "ผู้วิจัย" for first-person
-- Thai term + `(English term)` for technical vocabulary
-- Heading depth up to 4 levels (e.g. `3.2.3.2.1`)
-- Citation inline `{Author, Year #RecNum}` (EndNote temp format)
-- Mostly prose; bullets for explicit lists only
-- Avoid AI patterns (CLAUDE.md R6): no "ในยุคปัจจุบัน", no em-dash flood, no triadic bullets per paragraph, no "โดยสรุปแล้ว", keep "อย่างไรก็ตาม"/"ดังนั้น"/"นอกจากนี้" minimal
+4. **If user needs to fix iThesis upload:** see "Cookie/auth corruption" gotcha above.
 
 ## Commit convention
 
@@ -160,23 +173,6 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 User pushes commits themselves per `feedback_git_push.md` preference.
 
-## Commits through D2 (most recent first)
-
-```
-d0bf343 docs(is-book): draft ch2 literature review + 8 new verified refs
-076ff77 docs(is-book): draft ch1 introduction (~7 pages)
-eded484 docs(is-book): draft ch4.2 system development
-85ae95f docs(is-book): draft ch4.3 evaluation results (N=2 eval + N=6 TAM)
-430d8a9 docs(is-book): fix sample descriptions — no international students
-9c5e865 docs(is-book): add SESSION-HANDOFF + log session end for handoff
-87bead8 docs(is-book): draft ch4.1 in-depth interview findings + ch3 fix
-ba84b5f docs(is-book): draft ch3 methodology + canonical refs.ris
-f07a1c0 docs(is-book): validate EndNote workflow end-to-end
-8560c15 docs(is-book): fix RIS reference types for APA 7 rendering
-eb2c2a2 docs(is-book): add EndNote POC with 3 verified refs
-afc4265 docs(is-book): init workspace + design spec for IS thesis
-```
-
 ## Quick-start prompt for next session
 
-> อ่าน `docs/is-book/SESSION-HANDOFF.md` + `AI_LOG.md` ก่อน แล้วเริ่ม — เสร็จถึง ch1-4 แล้ว 64 หน้า รอ user ตอบ 5 unlock Qs สำหรับ ch5-6 ถ้ายังไม่ตอบให้ถามก่อน หรือถ้า user สั่งให้ใช้ research-backed defaults ก็ลุยได้เลย (mark ทุกตัวเลขด้วย `[USER-VERIFY:]`)
+> Manuscript + staging docx เสร็จแล้ว (all 7 chapters + front/back + appendices ก-ซ + 19 refs + financial xlsx + thematic xlsx + figures). เหลือ user submit เข้า iThesis — ถ้าเจอ `URIError: URI malformed` ใน add-in ให้ทำ cache nuke ตามที่ระบุใน SESSION-HANDOFF.md iThesis gotcha section. ถ้าจะแก้ manuscript ต่อ อ่าน `AI_LOG.md` session ล่าสุดก่อน.
