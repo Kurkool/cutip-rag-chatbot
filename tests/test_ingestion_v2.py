@@ -115,98 +115,6 @@ def test_extract_hyperlinks_skips_uris_already_visible_in_text():
 
 
 @pytest.mark.asyncio
-async def test_opus_parse_and_chunk_happy_path(monkeypatch):
-    """Mocked Opus returns a valid tool call → list of Document chunks."""
-    from langchain_core.messages import AIMessage
-
-    async def fake_ainvoke(messages):
-        return AIMessage(
-            content="",
-            tool_calls=[{
-                "name": "record_chunks",
-                "args": {
-                    "chunks": [
-                        {"text": "chunk one body", "section_path": "Intro", "page": 1, "has_table": False},
-                        {"text": "chunk two body", "section_path": "", "page": 2, "has_table": True},
-                    ],
-                },
-                "id": "call_1",
-            }],
-        )
-
-    class FakeLLM:
-        def bind_tools(self, tools, tool_choice=None):
-            return self
-
-        async def ainvoke(self, messages):
-            return await fake_ainvoke(messages)
-
-    # Patch the LLM factory used by v2.
-    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: FakeLLM())
-
-    pdf_bytes = b"%PDF-1.4\nminimal\n%%EOF"
-    hyperlinks = [{"page": 1, "text": "ref", "uri": "https://example.org"}]
-
-    chunks = await ingestion_v2.opus_parse_and_chunk(pdf_bytes, hyperlinks, "test.pdf")
-
-    assert len(chunks) == 2
-    assert chunks[0].page_content == "chunk one body"
-    assert chunks[0].metadata["section_path"] == "Intro"
-    assert chunks[0].metadata["page"] == 1
-    assert chunks[0].metadata["has_table"] is False
-    assert chunks[1].metadata["has_table"] is True
-
-
-@pytest.mark.asyncio
-async def test_opus_parse_and_chunk_filters_refusal_chunks(monkeypatch):
-    """Chunks whose text matches a known refusal pattern are dropped."""
-    from langchain_core.messages import AIMessage
-
-    class FakeLLM:
-        def bind_tools(self, tools, tool_choice=None):
-            return self
-
-        async def ainvoke(self, messages):
-            return AIMessage(content="", tool_calls=[{
-                "name": "record_chunks",
-                "args": {
-                    "chunks": [
-                        {"text": "I cannot process this document — please re-upload.", "page": 1},
-                        {"text": "real substantive content about วิทยานิพนธ์", "page": 1},
-                    ],
-                },
-                "id": "c1",
-            }])
-
-    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: FakeLLM())
-
-    chunks = await ingestion_v2.opus_parse_and_chunk(b"%PDF-1.4\n%%EOF", [], "t.pdf")
-
-    assert len(chunks) == 1
-    assert "real substantive content" in chunks[0].page_content
-
-
-@pytest.mark.asyncio
-async def test_opus_parse_and_chunk_returns_empty_when_no_tool_call(monkeypatch):
-    """If Opus replies without calling the tool, we return [] and do not crash."""
-    from langchain_core.messages import AIMessage
-
-    class FakeLLM:
-        def bind_tools(self, tools, tool_choice=None):
-            return self
-
-        async def ainvoke(self, messages):
-            # Note: no tool_calls attribute populated (model did not call the tool)
-            return AIMessage(content="I have nothing to say.")
-
-    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: FakeLLM())
-
-    chunks = await ingestion_v2.opus_parse_and_chunk(b"%PDF-1.4\n%%EOF", [], "t.pdf")
-
-    assert chunks == []
-
-
-@pytest.mark.asyncio
 async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
     """End-to-end: ensure_pdf → extract_hyperlinks → opus → _upsert."""
     from langchain_core.documents import Document
@@ -378,87 +286,6 @@ async def test_ocr_pdf_pages_all_pages_fail_raises(pure_scan_pdf_bytes, monkeypa
         await ingestion_v2.ocr_pdf_pages(pure_scan_pdf_bytes, "test.pdf")
 
 
-def test_format_ocr_sidecar_empty_dict_returns_placeholder():
-    from ingest.services._v2_prompts import format_ocr_sidecar
-    assert format_ocr_sidecar({}) == "(no OCR sidecar — document text layer sufficient)"
-
-
-def test_format_ocr_sidecar_populated_renders_per_page_sections():
-    from ingest.services._v2_prompts import format_ocr_sidecar
-    out = format_ocr_sidecar({1: "page one text", 2: "page two\nmore text"})
-    assert "### Page 1" in out
-    assert "page one text" in out
-    assert "### Page 2" in out
-    assert "page two\nmore text" in out
-
-
-def test_user_prompt_template_has_ocr_block_placeholder():
-    from ingest.services._v2_prompts import USER_PROMPT_TEMPLATE
-    assert "{ocr_block}" in USER_PROMPT_TEMPLATE
-
-
-@pytest.mark.asyncio
-async def test_opus_parse_and_chunk_injects_ocr_sidecar(monkeypatch, pure_scan_pdf_bytes):
-    """When ocr_sidecar is provided, the user message must contain the formatted OCR block."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    captured: dict = {}
-
-    fake_llm = MagicMock()
-
-    async def fake_ainvoke(messages):
-        # Capture the human message content for assertion.
-        human = messages[1]
-        captured["content"] = human.content
-        return MagicMock(tool_calls=[{"args": {"chunks": []}}])
-
-    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
-
-    ingestion_v2._get_opus_llm.cache_clear()
-    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
-
-    await ingestion_v2.opus_parse_and_chunk(
-        pdf_bytes=pure_scan_pdf_bytes,
-        hyperlinks=[],
-        filename="x.pdf",
-        ocr_sidecar={1: "hello from page 1", 2: "hello from page 2"},
-    )
-
-    # Find the text content block in the human message.
-    text_blocks = [b["text"] for b in captured["content"] if b.get("type") == "text"]
-    assert any("hello from page 1" in t for t in text_blocks)
-    assert any("### Page 1" in t for t in text_blocks)
-
-
-@pytest.mark.asyncio
-async def test_opus_parse_and_chunk_without_ocr_sidecar_uses_placeholder(monkeypatch, pure_scan_pdf_bytes):
-    from unittest.mock import AsyncMock, MagicMock
-
-    captured: dict = {}
-    fake_llm = MagicMock()
-
-    async def fake_ainvoke(messages):
-        captured["content"] = messages[1].content
-        return MagicMock(tool_calls=[{"args": {"chunks": []}}])
-
-    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
-
-    ingestion_v2._get_opus_llm.cache_clear()
-    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
-
-    await ingestion_v2.opus_parse_and_chunk(
-        pdf_bytes=pure_scan_pdf_bytes,
-        hyperlinks=[],
-        filename="x.pdf",
-        ocr_sidecar=None,
-    )
-
-    text_blocks = [b["text"] for b in captured["content"] if b.get("type") == "text"]
-    assert any("no OCR sidecar" in t for t in text_blocks)
-
-
 @pytest.mark.asyncio
 async def test_ingest_v2_pure_scan_triggers_ocr_path(monkeypatch, pure_scan_pdf_bytes):
     """Pure-scan PDF must trigger ocr_pdf_pages and pass its output downstream."""
@@ -594,115 +421,6 @@ def test_format_pages_for_text_only_has_page_markers_and_content():
     i1 = result.index("alpha text")
     i2 = result.index("beta text")
     assert i1 < i2
-
-
-def test_user_prompt_template_text_only_has_required_placeholders():
-    from ingest.services._v2_prompts import USER_PROMPT_TEMPLATE_TEXT_ONLY
-    assert "{filename}" in USER_PROMPT_TEMPLATE_TEXT_ONLY
-    assert "{sidecar_block}" in USER_PROMPT_TEMPLATE_TEXT_ONLY
-    assert "{page_text_block}" in USER_PROMPT_TEMPLATE_TEXT_ONLY
-    # Must NOT tell Opus to parse an attached PDF (there is no PDF block).
-    assert "attached PDF" not in USER_PROMPT_TEMPLATE_TEXT_ONLY
-
-
-@pytest.mark.asyncio
-async def test_opus_parse_and_chunk_text_only_omits_document_block(
-    monkeypatch, pure_scan_pdf_bytes
-):
-    """With ocr_sidecar populated, the human message must have ONE text block and NO document block."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    captured: dict = {}
-    fake_llm = MagicMock()
-
-    async def fake_ainvoke(messages):
-        captured["content"] = messages[1].content
-        return MagicMock(tool_calls=[{"args": {"chunks": []}}])
-
-    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
-
-    ingestion_v2._get_opus_llm.cache_clear()
-    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
-
-    await ingestion_v2.opus_parse_and_chunk(
-        pdf_bytes=pure_scan_pdf_bytes,
-        hyperlinks=[],
-        filename="x.pdf",
-        ocr_sidecar={1: "only page"},
-    )
-
-    blocks = captured["content"]
-    block_types = [b.get("type") for b in blocks]
-    assert block_types == ["text"], f"expected ['text'], got {block_types}"
-    assert "only page" in blocks[0]["text"]
-    assert "### Page 1" in blocks[0]["text"]
-
-
-@pytest.mark.asyncio
-async def test_opus_parse_and_chunk_text_only_accepts_none_pdf_bytes(
-    monkeypatch,
-):
-    """For .ocr.docx (no PDF at all), pdf_bytes=None must not crash the text-only path."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    captured: dict = {}
-    fake_llm = MagicMock()
-
-    async def fake_ainvoke(messages):
-        captured["content"] = messages[1].content
-        return MagicMock(tool_calls=[{"args": {"chunks": []}}])
-
-    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
-
-    ingestion_v2._get_opus_llm.cache_clear()
-    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
-
-    chunks = await ingestion_v2.opus_parse_and_chunk(
-        pdf_bytes=None,
-        hyperlinks=[],
-        filename="y.ocr.docx",
-        ocr_sidecar={1: "aaa", 2: "bbb"},
-    )
-
-    # Confirms no exception, content is text-only.
-    assert chunks == []
-    block_types = [b.get("type") for b in captured["content"]]
-    assert block_types == ["text"]
-    assert "aaa" in captured["content"][0]["text"]
-    assert "bbb" in captured["content"][0]["text"]
-
-
-@pytest.mark.asyncio
-async def test_opus_parse_and_chunk_pdf_path_keeps_document_block(
-    monkeypatch, pure_scan_pdf_bytes
-):
-    """Regression guard: text-layer PDF path still sends document + text blocks."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    captured: dict = {}
-    fake_llm = MagicMock()
-
-    async def fake_ainvoke(messages):
-        captured["content"] = messages[1].content
-        return MagicMock(tool_calls=[{"args": {"chunks": []}}])
-
-    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
-    fake_llm.bind_tools = MagicMock(return_value=fake_llm)
-
-    ingestion_v2._get_opus_llm.cache_clear()
-    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
-
-    await ingestion_v2.opus_parse_and_chunk(
-        pdf_bytes=pure_scan_pdf_bytes,
-        hyperlinks=[],
-        filename="x.pdf",
-        ocr_sidecar=None,
-    )
-
-    block_types = [b.get("type") for b in captured["content"]]
-    assert block_types == ["document", "text"], f"expected document+text, got {block_types}"
 
 
 @pytest.mark.asyncio
@@ -848,3 +566,195 @@ def test_pdf_to_image_blocks_raises_on_over_100_pages():
 
     with pytest.raises(ValueError, match="exceeds Anthropic's 100-image limit"):
         ingestion_v2._pdf_to_image_blocks(pdf_bytes)
+
+
+def test_user_prompt_template_drops_ocr_block_placeholder():
+    from ingest.services._v2_prompts import USER_PROMPT_TEMPLATE
+    assert "{filename}" in USER_PROMPT_TEMPLATE
+    assert "{sidecar_block}" in USER_PROMPT_TEMPLATE
+    assert "{ocr_block}" not in USER_PROMPT_TEMPLATE
+
+
+def test_system_prompt_instructs_json_fence_output():
+    from ingest.services._v2_prompts import SYSTEM_PROMPT
+    assert "```json" in SYSTEM_PROMPT
+    # tool_call language must be gone
+    assert "record_chunks" not in SYSTEM_PROMPT
+    # escape hatch
+    assert "[page" in SYSTEM_PROMPT and "unreadable]" in SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_images_mode_omits_document_block(
+    monkeypatch, pure_scan_pdf_bytes
+):
+    """mode='images' → content blocks include image type and exclude document type."""
+    from langchain_core.messages import AIMessage
+    from unittest.mock import AsyncMock, MagicMock
+
+    captured = {}
+
+    async def fake_ainvoke(messages):
+        captured["content"] = messages[1].content
+        return AIMessage(content='```json\n{"chunks": []}\n```')
+
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+
+    ingestion_v2._get_opus_llm.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=pure_scan_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        mode="images",
+    )
+
+    types = [b.get("type") for b in captured["content"]]
+    assert "image" in types
+    assert "document" not in types
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_document_mode_includes_document_block(
+    monkeypatch, tiny_text_pdf_bytes
+):
+    """mode='document' → content blocks include document + text."""
+    from langchain_core.messages import AIMessage
+    from unittest.mock import AsyncMock, MagicMock
+
+    captured = {}
+
+    async def fake_ainvoke(messages):
+        captured["content"] = messages[1].content
+        return AIMessage(content='```json\n{"chunks": []}\n```')
+
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+
+    ingestion_v2._get_opus_llm.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=tiny_text_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        mode="document",
+    )
+
+    types = [b.get("type") for b in captured["content"]]
+    assert types == ["document", "text"]
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_returns_chunks_from_json_fence(
+    monkeypatch, tiny_text_pdf_bytes
+):
+    """Chunks parsed from JSON fence are returned as Documents with metadata."""
+    from langchain_core.messages import AIMessage
+    from unittest.mock import AsyncMock, MagicMock
+
+    payload = (
+        '```json\n'
+        '{"chunks": ['
+        '{"text": "alpha", "page": 1, "section_path": "Intro", "has_table": false},'
+        '{"text": "beta", "page": 2, "section_path": "", "has_table": true}'
+        ']}\n'
+        '```'
+    )
+
+    async def fake_ainvoke(messages):
+        return AIMessage(content=payload)
+
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+
+    ingestion_v2._get_opus_llm.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    chunks = await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=tiny_text_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        mode="document",
+    )
+
+    assert len(chunks) == 2
+    assert chunks[0].page_content == "alpha"
+    assert chunks[0].metadata == {"page": 1, "section_path": "Intro", "has_table": False}
+    assert chunks[1].metadata["has_table"] is True
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_returns_empty_on_no_json_fence(
+    monkeypatch, tiny_text_pdf_bytes
+):
+    """If Opus replies with prose (no JSON fence) we return [] and log a warning."""
+    from langchain_core.messages import AIMessage
+    from unittest.mock import AsyncMock, MagicMock
+
+    async def fake_ainvoke(messages):
+        return AIMessage(content="I cannot read this document clearly.")
+
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+
+    ingestion_v2._get_opus_llm.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    chunks = await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=tiny_text_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        mode="document",
+    )
+
+    assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_filters_unreadable_escape_hatch(
+    monkeypatch, tiny_text_pdf_bytes
+):
+    """Chunks of the form [page N: unreadable] are filtered out."""
+    from langchain_core.messages import AIMessage
+    from unittest.mock import AsyncMock, MagicMock
+
+    payload = (
+        '```json\n{"chunks": ['
+        '{"text": "[page 3: unreadable]", "page": 3, "section_path": "", "has_table": false},'
+        '{"text": "real content", "page": 4, "section_path": "", "has_table": false}'
+        ']}\n```'
+    )
+
+    async def fake_ainvoke(messages):
+        return AIMessage(content=payload)
+
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+
+    ingestion_v2._get_opus_llm.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    chunks = await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=tiny_text_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        mode="document",
+    )
+
+    assert len(chunks) == 1
+    assert chunks[0].page_content == "real content"
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_invalid_mode_raises(tiny_text_pdf_bytes):
+    import pytest
+    with pytest.raises(ValueError, match="unknown mode"):
+        await ingestion_v2.opus_parse_and_chunk(
+            pdf_bytes=tiny_text_pdf_bytes,
+            hyperlinks=[],
+            filename="x.pdf",
+            mode="bogus",
+        )
