@@ -811,3 +811,40 @@ def test_text_from_response_concatenates_text_blocks_only():
         {"type": "text", "text": "second"},
     ]
     assert ingestion_v2._text_from_response(fake) == "first\nsecond"
+
+
+def test_pdf_to_image_blocks_returns_image_block_per_page():
+    """3-page PDF → 3 image blocks, each base64 PNG with media_type=image/png."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    for _ in range(3):
+        page = doc.new_page()
+        page.insert_text((72, 72), "hello")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    blocks = ingestion_v2._pdf_to_image_blocks(pdf_bytes)
+
+    assert len(blocks) == 3
+    for b in blocks:
+        assert b["type"] == "image"
+        assert b["source"]["type"] == "base64"
+        assert b["source"]["media_type"] == "image/png"
+        assert isinstance(b["source"]["data"], str)
+        assert len(b["source"]["data"]) > 0
+
+
+def test_pdf_to_image_blocks_raises_on_over_100_pages():
+    """Anthropic limit is 100 image blocks per request; surface a clear error."""
+    import pymupdf
+    import pytest
+
+    doc = pymupdf.open()
+    for _ in range(101):
+        doc.new_page()
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    with pytest.raises(ValueError, match="exceeds Anthropic's 100-image limit"):
+        ingestion_v2._pdf_to_image_blocks(pdf_bytes)
