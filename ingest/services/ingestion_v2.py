@@ -86,6 +86,46 @@ def _text_from_response(response):
     return str(content or "")
 
 
+def _pdf_to_image_blocks(pdf_bytes, dpi=150):
+    """Rasterise every PDF page to PNG and wrap as Anthropic image content blocks.
+
+    Used by ``opus_parse_and_chunk`` when the PDF has no text layer.
+    Mirrors what claude.ai does internally for PDF uploads — Anthropic's PDF
+    ``document`` block path is unreliable on long pure-scan Thai legal docs
+    (silent ``chunks=[]`` even with an OCR sidecar). Sending pre-rendered
+    images bypasses that path.
+
+    DPI 150 balances OCR fidelity against payload size: a 24-page Thai legal
+    scan at 150 DPI is ~36K input tokens vs ~5K for the document block.
+
+    Anthropic limits a single request to 100 image blocks. This function
+    raises ``ValueError`` if the PDF exceeds that.
+    """
+    import pymupdf
+    blocks = []
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        if doc.page_count > 100:
+            raise ValueError(
+                f"_pdf_to_image_blocks: {doc.page_count} pages exceeds "
+                f"Anthropic's 100-image limit"
+            )
+        for page in doc:
+            pix = page.get_pixmap(dpi=dpi, alpha=False)
+            png = pix.tobytes("png")
+            blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": base64.standard_b64encode(png).decode("utf-8"),
+                },
+            })
+    finally:
+        doc.close()
+    return blocks
+
+
 @lru_cache(maxsize=1)
 def _get_ocr_client():
     """Cached raw AsyncAnthropic client for per-page vision OCR.
