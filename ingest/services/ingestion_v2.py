@@ -502,73 +502,55 @@ async def opus_parse_and_chunk(
 
 
 async def ingest_v2(
-    file_bytes: bytes,
-    filename: str,
-    namespace: str,
-    tenant_id: str,
-    doc_category: str = "general",
-    url: str = "",
-    download_link: str = "",
-    drive_file_id: str = "",
-) -> int:
+    file_bytes,
+    filename,
+    namespace,
+    tenant_id,
+    doc_category="general",
+    url="",
+    download_link="",
+    drive_file_id="",
+):
     """v2 universal ingestion entrypoint.
 
     Pipeline:
-      1. Route by filename:
-         - ``.ocr.docx`` → ``_read_ocr_docx_as_pages`` → text-only Opus path
-         - other → ``ensure_pdf`` + pure-scan detection → OCR or not → Opus
-      2. ``opus_parse_and_chunk`` returns chunks with page/section_path/has_table
-      3. ``_upsert`` (reused from v1) — Cohere embed, Pinecone atomic swap,
-         BM25 cross-process invalidation
+      1. ensure_pdf — normalize any supported format to PDF
+      2. extract_page_text — detect text-layer; routes to either:
+         - "document" mode: text-layer PDF → Anthropic document block
+         - "images" mode:   pure-scan PDF → rasterised page image blocks
+      3. opus_parse_and_chunk — free-form JSON fence response
+      4. _upsert — Cohere embed, Pinecone atomic swap, BM25 invalidation
 
     ``drive_file_id`` (optional) stores the Drive file ID in chunk metadata
-    so admin delete can remove the Drive file by ID even after rename —
-    name-based lookup breaks when users rename files in Drive after ingest.
+    so admin delete can remove the Drive file by ID even after rename.
     """
     from ingest.services.ingest_helpers import _build_metadata, _upsert
 
-    pdf_bytes: bytes | None
-    hyperlinks: list[dict]
-    ocr_sidecar: dict[int, str] | None
-
-    if filename.lower().endswith(".ocr.docx"):
-        # OCR'd content already — skip LibreOffice + PDF path entirely.
-        ocr_sidecar = _read_ocr_docx_as_pages(file_bytes)
-        pdf_bytes = None
-        hyperlinks = []
+    pdf_bytes = ensure_pdf(file_bytes, filename)
+    page_text = extract_page_text(pdf_bytes)
+    total_text_chars = sum(len(t) for t in page_text.values())
+    if total_text_chars <= 0:
+        mode = "images"
         logger.info(
-            "ingest_v2(%s): .ocr.docx detected — %d pages, %d total chars, skipping LibreOffice + PDF path",
-            filename, len(ocr_sidecar), sum(len(t) for t in ocr_sidecar.values()),
+            "ingest_v2(%s): pure-scan detected (0 text chars across %d pages), using image blocks",
+            filename, len(page_text),
         )
     else:
-        pdf_bytes = ensure_pdf(file_bytes, filename)
-        page_text = extract_page_text(pdf_bytes)
-        total_text_chars = sum(len(t) for t in page_text.values())
-        if total_text_chars <= PURE_SCAN_TEXT_THRESHOLD:
-            logger.info(
-                "ingest_v2(%s): pure-scan detected (0 text chars across %d pages), running OCR",
-                filename, len(page_text),
-            )
-            ocr_sidecar = await ocr_pdf_pages(pdf_bytes, filename)
-        else:
-            logger.debug(
-                "ingest_v2(%s): text-layer PDF (%d chars across %d pages), OCR skipped",
-                filename, total_text_chars, len(page_text),
-            )
-            ocr_sidecar = None
-        hyperlinks = extract_hyperlinks(pdf_bytes)
+        mode = "document"
+        logger.debug(
+            "ingest_v2(%s): text-layer PDF (%d chars across %d pages), using document block",
+            filename, total_text_chars, len(page_text),
+        )
+    hyperlinks = extract_hyperlinks(pdf_bytes)
 
-    chunks = await opus_parse_and_chunk(
-        pdf_bytes, hyperlinks, filename, ocr_sidecar=ocr_sidecar,
-    )
-
+    chunks = await opus_parse_and_chunk(pdf_bytes, hyperlinks, filename, mode=mode)
     if not chunks:
         logger.warning("ingest_v2(%s): Opus returned 0 chunks — nothing upserted", filename)
         return 0
 
     metadata = _build_metadata(
         tenant_id=tenant_id,
-        source_type="pdf",  # v2 universalizes to pdf
+        source_type="pdf",
         source_filename=filename,
         doc_category=doc_category,
         url=url,

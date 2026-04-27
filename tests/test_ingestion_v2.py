@@ -133,8 +133,8 @@ async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
         calls["extract_hyperlinks"] = pdf
         return [{"page": 1, "text": "t", "uri": "https://x"}]
 
-    async def fake_opus(pdf, links, fn, ocr_sidecar=None):
-        calls["opus"] = (pdf, links, fn)
+    async def fake_opus(pdf, links, fn, mode):
+        calls["opus"] = (pdf, links, fn, mode)
         return [Document(page_content="body", metadata={"page": 1, "section_path": "", "has_table": False})]
 
     async def fake_upsert(chunks, namespace, extra_metadata):
@@ -166,6 +166,7 @@ async def test_ingest_v2_orchestrates_pipeline(monkeypatch):
     assert calls["ensure_pdf"] == (b"DOCX-bytes", "form.docx")
     assert calls["extract_hyperlinks"] == b"%PDF-1.4\nnormalized\n%%EOF"
     assert calls["opus"][2] == "form.docx"
+    assert calls["opus"][3] == "document"  # tiny text content → document mode
     assert calls["upsert"]["namespace"] == "cutip_v2_audit"
     meta = calls["upsert"]["extra_metadata"]
     assert meta["tenant_id"] == "cutip_01"
@@ -286,66 +287,6 @@ async def test_ocr_pdf_pages_all_pages_fail_raises(pure_scan_pdf_bytes, monkeypa
         await ingestion_v2.ocr_pdf_pages(pure_scan_pdf_bytes, "test.pdf")
 
 
-@pytest.mark.asyncio
-async def test_ingest_v2_pure_scan_triggers_ocr_path(monkeypatch, pure_scan_pdf_bytes):
-    """Pure-scan PDF must trigger ocr_pdf_pages and pass its output downstream."""
-    from unittest.mock import AsyncMock
-
-    captured: dict = {}
-
-    async def fake_ocr(pdf_bytes, filename):
-        captured["ocr_called"] = True
-        captured["filename"] = filename
-        return {1: "ocr p1", 2: "ocr p2"}
-
-    async def fake_opus(pdf_bytes, hyperlinks, filename, ocr_sidecar=None):
-        captured["ocr_sidecar_arg"] = ocr_sidecar
-        return []  # 0 chunks — we're not exercising the upsert here
-
-    monkeypatch.setattr(ingestion_v2, "ocr_pdf_pages", fake_ocr)
-    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
-
-    result = await ingestion_v2.ingest_v2(
-        file_bytes=pure_scan_pdf_bytes,
-        filename="scan.pdf",
-        namespace="ns-test",
-        tenant_id="tenant_x",
-    )
-
-    assert result == 0
-    assert captured.get("ocr_called") is True
-    assert captured["ocr_sidecar_arg"] == {1: "ocr p1", 2: "ocr p2"}
-
-
-@pytest.mark.asyncio
-async def test_ingest_v2_text_layer_skips_ocr(monkeypatch, tiny_text_pdf_bytes):
-    """Text-layer PDF must NOT trigger ocr_pdf_pages."""
-    from unittest.mock import AsyncMock
-
-    captured: dict = {}
-
-    async def fake_ocr(pdf_bytes, filename):
-        captured["ocr_called"] = True
-        return {}
-
-    async def fake_opus(pdf_bytes, hyperlinks, filename, ocr_sidecar=None):
-        captured["ocr_sidecar_arg"] = ocr_sidecar
-        return []
-
-    monkeypatch.setattr(ingestion_v2, "ocr_pdf_pages", fake_ocr)
-    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
-
-    await ingestion_v2.ingest_v2(
-        file_bytes=tiny_text_pdf_bytes,
-        filename="text.pdf",
-        namespace="ns-test",
-        tenant_id="tenant_x",
-    )
-
-    assert captured.get("ocr_called") is not True
-    assert captured["ocr_sidecar_arg"] is None
-
-
 def test_read_ocr_docx_as_pages_splits_on_page_headings():
     """Docx with 'หน้า N' level-2 headings → pages keyed by N with joined paragraph text."""
     import io
@@ -421,70 +362,6 @@ def test_format_pages_for_text_only_has_page_markers_and_content():
     i1 = result.index("alpha text")
     i2 = result.index("beta text")
     assert i1 < i2
-
-
-@pytest.mark.asyncio
-async def test_ingest_v2_ocr_docx_skips_libreoffice_and_hyperlinks(
-    monkeypatch,
-):
-    """Filename ending in .ocr.docx → read docx paragraphs, skip ensure_pdf + extract_hyperlinks."""
-    import io
-    from docx import Document as DocxDocument
-    from unittest.mock import AsyncMock
-
-    # Build a minimal .ocr.docx with 2 pages.
-    docx = DocxDocument()
-    docx.add_heading("title", level=1)
-    docx.add_heading("หน้า 1", level=2)
-    docx.add_paragraph("page one body")
-    docx.add_heading("หน้า 2", level=2)
-    docx.add_paragraph("page two body")
-    buf = io.BytesIO()
-    docx.save(buf)
-    docx_bytes = buf.getvalue()
-
-    captured: dict = {"ensure_pdf_called": False, "hyperlinks_called": False}
-
-    def fake_ensure_pdf(blob, fn):
-        captured["ensure_pdf_called"] = True
-        return b""
-
-    def fake_extract_hyperlinks(pdf):
-        captured["hyperlinks_called"] = True
-        return []
-
-    async def fake_opus(pdf_bytes, hyperlinks, filename, ocr_sidecar=None):
-        captured["opus_pdf_bytes"] = pdf_bytes
-        captured["opus_hyperlinks"] = hyperlinks
-        captured["opus_ocr_sidecar"] = ocr_sidecar
-        return []
-
-    async def fake_upsert(chunks, namespace, extra_metadata):
-        return len(chunks)
-
-    monkeypatch.setattr(ingestion_v2, "ensure_pdf", fake_ensure_pdf)
-    monkeypatch.setattr(ingestion_v2, "extract_hyperlinks", fake_extract_hyperlinks)
-    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
-
-    import ingest.services.ingest_helpers as v1_mod
-    monkeypatch.setattr(v1_mod, "_upsert", fake_upsert)
-
-    result = await ingestion_v2.ingest_v2(
-        file_bytes=docx_bytes,
-        filename="ประกาศ.ocr.docx",
-        namespace="ns-test",
-        tenant_id="t",
-    )
-
-    assert result == 0
-    assert captured["ensure_pdf_called"] is False
-    assert captured["hyperlinks_called"] is False
-    assert captured["opus_pdf_bytes"] is None
-    assert captured["opus_hyperlinks"] == []
-    assert captured["opus_ocr_sidecar"] == {
-        1: "page one body",
-        2: "page two body",
-    }
 
 
 def test_extract_json_from_fence_parses_basic_fence():
@@ -795,3 +672,45 @@ async def test_opus_parse_and_chunk_keeps_chunks_starting_with_page_word(
     # The actual [page 5: unreadable] sentinel is filtered.
     assert len(chunks) == 1
     assert "[page heading" in chunks[0].page_content
+
+
+@pytest.mark.asyncio
+async def test_ingest_v2_pure_scan_routes_to_images_mode(monkeypatch, pure_scan_pdf_bytes):
+    """A PDF with empty text layer must dispatch opus_parse_and_chunk(mode='images')."""
+    captured = {}
+
+    async def fake_opus(pdf, links, fn, mode):
+        captured["mode"] = mode
+        return []
+
+    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
+
+    await ingestion_v2.ingest_v2(
+        file_bytes=pure_scan_pdf_bytes,
+        filename="scan.pdf",
+        namespace="ns-test",
+        tenant_id="t",
+    )
+
+    assert captured["mode"] == "images"
+
+
+@pytest.mark.asyncio
+async def test_ingest_v2_text_layer_routes_to_document_mode(monkeypatch, tiny_text_pdf_bytes):
+    """A PDF with non-empty text layer must dispatch opus_parse_and_chunk(mode='document')."""
+    captured = {}
+
+    async def fake_opus(pdf, links, fn, mode):
+        captured["mode"] = mode
+        return []
+
+    monkeypatch.setattr(ingestion_v2, "opus_parse_and_chunk", fake_opus)
+
+    await ingestion_v2.ingest_v2(
+        file_bytes=tiny_text_pdf_bytes,
+        filename="text.pdf",
+        namespace="ns-test",
+        tenant_id="t",
+    )
+
+    assert captured["mode"] == "document"
