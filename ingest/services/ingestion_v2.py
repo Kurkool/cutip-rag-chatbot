@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 import os
 import re
@@ -37,6 +38,33 @@ OCR_CONCURRENCY = 4
 OCR_DPI = 200
 OCR_MAX_TOKENS_PER_PAGE = 4096
 PURE_SCAN_TEXT_THRESHOLD = 0
+
+
+def _extract_json_from_fence(text):
+    """Extract a JSON object from a markdown fence, tolerating extra prose.
+
+    Opus 4.7 reliably outputs JSON inside a ```json … ``` fence when
+    the system prompt asks for it. We accept either a fenced code block or
+    bare JSON with extra text by finding the outermost { … } span.
+
+    Returns ``None`` on parse failure or empty input — caller logs and treats
+    as 0 chunks.
+    """
+    if not text:
+        return None
+    m = _JSON_FENCE_RE.search(text)
+    candidate = m.group(1) if m else text
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                return json.loads(candidate[start:end + 1])
+            except json.JSONDecodeError:
+                return None
+    return None
 
 
 @lru_cache(maxsize=1)
@@ -130,6 +158,7 @@ async def ocr_pdf_pages(pdf_bytes: bytes, filename: str) -> dict[int, str]:
 
 
 _OCR_DOCX_PAGE_HEADING_RE = re.compile(r"^หน้า\s+(\d+)\s*$")
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 def _read_ocr_docx_as_pages(file_bytes: bytes) -> dict[int, str]:
