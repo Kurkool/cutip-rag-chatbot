@@ -767,3 +767,29 @@ async def test_ingest_v2_ocr_docx_skips_libreoffice_and_hyperlinks(
         1: "page one body",
         2: "page two body",
     }
+
+
+def test_extract_json_from_fence_parses_basic_fence():
+    text = """some chatter
+```json
+{"chunks": [{"text": "a", "page": 1}]}
+```
+trailing prose"""
+    result = ingestion_v2._extract_json_from_fence(text)
+    assert result == {"chunks": [{"text": "a", "page": 1}]}
+
+
+def test_extract_json_from_fence_parses_bare_json_with_prose():
+    text = 'Here is the result: {"chunks": [{"text": "alpha", "page": 1}]} done.'
+    result = ingestion_v2._extract_json_from_fence(text)
+    assert result == {"chunks": [{"text": "alpha", "page": 1}]}
+
+
+def test_extract_json_from_fence_returns_none_on_malformed():
+    text = "```json\nthis is not json at all\n```"
+    assert ingestion_v2._extract_json_from_fence(text) is None
+
+
+def test_extract_json_from_fence_returns_none_on_empty():
+    assert ingestion_v2._extract_json_from_fence("") is None
+    assert ingestion_v2._extract_json_from_fence(None) is None
