@@ -67,6 +67,25 @@ def _extract_json_from_fence(text):
     return None
 
 
+def _text_from_response(response):
+    """Return the concatenated text-block content from a langchain AIMessage.
+
+    Opus 4.7 with adaptive thinking returns ``content`` as a list of typed
+    blocks (``thinking``, ``text``, …). Plain string content is also handled
+    for compatibility with simpler responses (and tests).
+    """
+    content = response.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "text":
+                parts.append(b.get("text", ""))
+        return "\n".join(parts)
+    return str(content or "")
+
+
 @lru_cache(maxsize=1)
 def _get_ocr_client():
     """Cached raw AsyncAnthropic client for per-page vision OCR.

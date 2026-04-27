@@ -793,3 +793,21 @@ def test_extract_json_from_fence_returns_none_on_malformed():
 def test_extract_json_from_fence_returns_none_on_empty():
     assert ingestion_v2._extract_json_from_fence("") is None
     assert ingestion_v2._extract_json_from_fence(None) is None
+
+
+def test_text_from_response_handles_string_content():
+    from unittest.mock import MagicMock
+    fake = MagicMock()
+    fake.content = "hello world"
+    assert ingestion_v2._text_from_response(fake) == "hello world"
+
+
+def test_text_from_response_concatenates_text_blocks_only():
+    from unittest.mock import MagicMock
+    fake = MagicMock()
+    fake.content = [
+        {"type": "thinking", "thinking": "internal monologue"},  # ignored
+        {"type": "text", "text": "first"},
+        {"type": "text", "text": "second"},
+    ]
+    assert ingestion_v2._text_from_response(fake) == "first\nsecond"
