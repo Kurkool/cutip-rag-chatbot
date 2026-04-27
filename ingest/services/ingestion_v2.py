@@ -21,11 +21,9 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ingest.services._v2_prompts import (
-    CHUNK_TOOL_SCHEMA,
     SYSTEM_PROMPT,
     USER_PROMPT_TEMPLATE,
     format_sidecar,
-    format_ocr_sidecar,  # NEW
 )
 from ingest.services.vision import _looks_like_refusal
 
@@ -299,15 +297,12 @@ def _format_pages_for_text_only(ocr_sidecar: dict[int, str]) -> str:
 def _get_opus_llm():
     """Return the Opus 4.7 LLM used for v2 parse+chunk (cached per process).
 
-    Adaptive thinking is ENABLED. Anthropic disallows thinking when
-    ``tool_choice`` forces a specific tool, so ``opus_parse_and_chunk``
-    pairs this factory with ``tool_choice={"type": "auto"}`` — the system
-    prompt still instructs Opus to call ``record_chunks``, and Opus
-    reliably complies, but the model is free to think first. This
-    matters for long complex docs (45-page slide decks, dense
-    announcement PDFs with 20+ per-item records) where empirically the
-    non-thinking forced-tool path produced empty chunks after multi-
-    minute stalls.
+    Adaptive thinking is ENABLED. No tool binding — the system prompt
+    instructs Opus to emit a ``\\`\\`\\`json`` fence and we parse it in Python.
+    Earlier iterations of this pipeline used ``bind_tools`` + ``tool_choice``
+    but empirically Opus would opt out of the tool call on long Thai legal
+    docs (silent ``chunks=[]``). Free-form text + JSON fence reliably
+    produces parseable output.
 
     Cached so a batch audit (e.g. 14 PDFs) does not re-instantiate the
     HTTP-pooled client once per file. Tests monkeypatch this function
@@ -409,64 +404,35 @@ def extract_page_text(pdf_bytes: bytes) -> dict[int, str]:
 
 
 async def opus_parse_and_chunk(
-    pdf_bytes: bytes | None,
-    hyperlinks: list[dict],
-    filename: str,
-    ocr_sidecar: dict[int, str] | None = None,
-) -> list[Document]:
-    """Send PDF + sidecar (or text-only content) to Opus 4.7 with auto tool use, return chunks.
+    pdf_bytes,
+    hyperlinks,
+    filename,
+    mode,
+):
+    """Send PDF (or rasterised page images) to Opus 4.7, parse JSON-fence response.
 
-    Two content-block shapes:
+    No tool binding. The system prompt instructs Opus to emit one
+    ``\\`\\`\\`json`` fence containing ``{"chunks": [...]}``. We accept text output
+    and parse the fence.
 
-    1. **Text-only path** (``ocr_sidecar is not None``): single ``text`` block
-       with filename, hyperlink sidecar, and page-delineated OCR text. No
-       PDF ``document`` block. Used for pure-scan PDFs (Haiku OCR output)
-       and ``.ocr.docx`` files (paragraph extraction). Empirically Opus
-       silent-fails on the document-block path for long dense Thai legal
-       scans; text-only keeps the smart-chunking contract without the
-       failure mode.
+    ``mode`` selects the content shape:
+    - ``"document"`` — text-layer PDF: ``[document_block, text_block]``
+    - ``"images"``   — pure-scan PDF: ``[image_block, …, text_block]``
 
-    2. **PDF path** (``ocr_sidecar is None``): legacy shape — ``document``
-       block (base64 PDF) + ``text`` block (filename + hyperlink sidecar +
-       empty OCR sidecar placeholder). Used for text-layer PDFs where
-       Anthropic's internal PDF processing is reliable. Unchanged.
-
-    Both paths use ``tool_choice={"type": "auto"}`` + ``record_chunks``
-    tool schema (see :func:`_get_opus_llm` docstring for why forced
-    tool_choice is not used).
-
-    Returns a list of LangChain ``Document`` objects with metadata
-    ``{page, section_path, has_table}``. Empty / refusal / malformed
-    responses return ``[]``.
+    Empty / refusal / [page N: unreadable] chunks are filtered out. Any failure
+    to parse JSON returns ``[]`` (caller logs and treats as 0 chunks).
     """
-    from ingest.services._v2_prompts import (
-        USER_PROMPT_TEMPLATE_TEXT_ONLY,
+    sidecar_block = format_sidecar(hyperlinks)
+    user_text = USER_PROMPT_TEMPLATE.format(
+        filename=filename,
+        sidecar_block=sidecar_block,
     )
 
-    sidecar_block = format_sidecar(hyperlinks)
-
-    if ocr_sidecar is not None:
-        # Text-only path: no document block.
-        page_text_block = _format_pages_for_text_only(ocr_sidecar)
-        user_text = USER_PROMPT_TEMPLATE_TEXT_ONLY.format(
-            filename=filename,
-            sidecar_block=sidecar_block,
-            page_text_block=page_text_block,
-        )
-        human_content: list[dict] = [{"type": "text", "text": user_text}]
-    else:
-        # Legacy PDF path: document block + text block.
-        if pdf_bytes is None:
-            raise ValueError(
-                "opus_parse_and_chunk: pdf_bytes cannot be None when ocr_sidecar is None"
-            )
+    if mode == "images":
+        image_blocks = _pdf_to_image_blocks(pdf_bytes)
+        human_content = [*image_blocks, {"type": "text", "text": user_text}]
+    elif mode == "document":
         pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
-        ocr_block = format_ocr_sidecar({})  # always empty on this path
-        user_text = USER_PROMPT_TEMPLATE.format(
-            filename=filename,
-            sidecar_block=sidecar_block,
-            ocr_block=ocr_block,
-        )
         human_content = [
             {
                 "type": "document",
@@ -478,43 +444,56 @@ async def opus_parse_and_chunk(
             },
             {"type": "text", "text": user_text},
         ]
+    else:
+        raise ValueError(f"opus_parse_and_chunk: unknown mode {mode!r}")
 
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=human_content),
     ]
+    response = await _get_opus_llm().ainvoke(messages)
 
-    llm = _get_opus_llm().bind_tools(
-        [CHUNK_TOOL_SCHEMA],
-        tool_choice={"type": "auto"},
+    meta = response.response_metadata or {}
+    stop_reason = meta.get("stop_reason")
+    usage = meta.get("usage", {}) or {}
+    text = _text_from_response(response)
+    logger.info(
+        "opus_parse(%s mode=%s): stop=%s in_tok=%s out_tok=%s text_len=%d",
+        filename, mode, stop_reason,
+        usage.get("input_tokens"), usage.get("output_tokens"), len(text),
     )
-    response = await llm.ainvoke(messages)
 
-    tool_calls = getattr(response, "tool_calls", None) or []
-    if not tool_calls:
+    parsed = _extract_json_from_fence(text)
+    if not parsed or "chunks" not in parsed:
         logger.warning(
-            "opus_parse_and_chunk(%s): no tool_call in response — returning []",
-            filename,
+            "opus_parse(%s): could not parse JSON. preview=%r",
+            filename, text[:800],
         )
         return []
 
-    raw_chunks = tool_calls[0].get("args", {}).get("chunks", [])
-    cleaned: list[Document] = []
+    raw_chunks = parsed.get("chunks") or []
+    cleaned = []
     for c in raw_chunks:
-        text = (c.get("text") or "").strip()
-        if not text:
+        t = (c.get("text") or "").strip()
+        if not t:
             continue
-        if _looks_like_refusal(text):
+        if t.startswith("[page") and t.endswith("unreadable]"):
+            continue
+        if _looks_like_refusal(t):
             logger.warning(
-                "opus_parse_and_chunk(%s): dropping refusal-pattern chunk on page %s",
+                "opus_parse(%s): dropping refusal chunk on page %s",
                 filename, c.get("page", "?"),
             )
             continue
+        try:
+            page = int(c.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
         cleaned.append(Document(
-            page_content=text,
+            page_content=t,
             metadata={
-                "page": int(c.get("page", 1)),
-                "section_path": c.get("section_path", ""),
+                "page": page,
+                "section_path": c.get("section_path", "") or "",
                 "has_table": bool(c.get("has_table", False)),
             },
         ))
