@@ -216,6 +216,7 @@ async def ocr_pdf_pages(pdf_bytes: bytes, filename: str) -> dict[int, str]:
 
 _OCR_DOCX_PAGE_HEADING_RE = re.compile(r"^หน้า\s+(\d+)\s*$")
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_UNREADABLE_PAGE_RE = re.compile(r"\[page \d+: unreadable\]")
 
 
 def _read_ocr_docx_as_pages(file_bytes: bytes) -> dict[int, str]:
@@ -477,7 +478,7 @@ async def opus_parse_and_chunk(
         t = (c.get("text") or "").strip()
         if not t:
             continue
-        if t.startswith("[page") and t.endswith("unreadable]"):
+        if _UNREADABLE_PAGE_RE.fullmatch(t):
             continue
         if _looks_like_refusal(t):
             logger.warning(

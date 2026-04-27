@@ -758,3 +758,40 @@ async def test_opus_parse_and_chunk_invalid_mode_raises(tiny_text_pdf_bytes):
             filename="x.pdf",
             mode="bogus",
         )
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_keeps_chunks_starting_with_page_word(
+    monkeypatch, tiny_text_pdf_bytes
+):
+    """Ensure the escape-hatch filter doesn't false-positive on legitimate content."""
+    from langchain_core.messages import AIMessage
+    from unittest.mock import AsyncMock, MagicMock
+
+    payload = (
+        '```json\n{"chunks": ['
+        '{"text": "[page heading describing unreadable historical text]", "page": 1, "section_path": "", "has_table": false},'
+        '{"text": "[page 5: unreadable]", "page": 5, "section_path": "", "has_table": false}'
+        ']}\n```'
+    )
+
+    async def fake_ainvoke(messages):
+        return AIMessage(content=payload)
+
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+
+    ingestion_v2._get_opus_llm.cache_clear()
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    chunks = await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=tiny_text_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        mode="document",
+    )
+
+    # Only the legitimate "starting-with-[page" chunk survives
+    # The actual [page 5: unreadable] sentinel is filtered.
+    assert len(chunks) == 1
+    assert "[page heading" in chunks[0].page_content
