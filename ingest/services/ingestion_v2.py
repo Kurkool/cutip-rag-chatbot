@@ -54,6 +54,49 @@ def _extract_json_from_fence(text):
     return None
 
 
+_CHUNKS_ARRAY_START_RE = re.compile(r'"chunks"\s*:\s*\[')
+
+
+def _salvage_complete_chunks_from_truncated(text):
+    """Extract complete chunk objects from a possibly-truncated JSON response.
+
+    When Opus hits ``max_tokens`` the JSON output is cut mid-array (and the
+    closing ``]}`` of the wrapper never arrive), so :func:`_extract_json_from_fence`
+    fails outright. We can still recover the chunks Opus completed before the
+    cut by walking object-by-object using ``json.JSONDecoder.raw_decode``:
+
+    1. Find ``"chunks": [`` in the text.
+    2. Skip whitespace/commas, parse one ``{ ... }`` at a time with ``raw_decode``.
+    3. On the first ``JSONDecodeError`` (the truncated trailing object) — stop.
+
+    Returns ``[]`` for empty/None input, missing chunks marker, or truncation
+    before the first complete object. Caller treats ``[]`` as 0 chunks.
+    """
+    if not text:
+        return []
+    m = _CHUNKS_ARRAY_START_RE.search(text)
+    if not m:
+        return []
+    decoder = json.JSONDecoder()
+    chunks = []
+    i = m.end()  # position right after the opening [
+    n = len(text)
+    while i < n:
+        # Skip whitespace + the comma between objects.
+        while i < n and text[i] in " \t\n\r,":
+            i += 1
+        if i >= n or text[i] != "{":
+            break
+        try:
+            obj, end_idx = decoder.raw_decode(text, idx=i)
+        except json.JSONDecodeError:
+            # Hit the truncated trailing object — stop.
+            break
+        chunks.append(obj)
+        i = end_idx
+    return chunks
+
+
 def _text_from_response(response):
     """Return the concatenated text-block content from a langchain AIMessage.
 
@@ -138,11 +181,13 @@ def _get_opus_llm():
     return ChatAnthropic(
         model=settings.OCR_MODEL,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        # 32K output budget: slide decks (45+ pages × ~500 tokens/chunk)
-        # and dense announcement PDFs (23+ student records) both
-        # overflowed the previous 8K cap, surfacing as silent 0-chunk
-        # returns when the tool_call JSON was truncated mid-array.
-        max_tokens=32000,
+        # 64K output budget: empirically a 24-page Thai legal scan
+        # (ประกาศจุฬาฯ 2563.pdf via image blocks) emits ~36K chars / ~32K
+        # output tokens — the prior 32K cap truncated mid-array and a
+        # JSON parse failed. The salvage helper recovers partial output
+        # when the cap is still hit; raising the cap to 64K reduces how
+        # often that fallback fires for typical Thai legal documents.
+        max_tokens=64000,
         max_retries=3,
         thinking={"type": "adaptive"},
     )
@@ -289,11 +334,21 @@ async def opus_parse_and_chunk(
 
     parsed = _extract_json_from_fence(text)
     if not parsed or "chunks" not in parsed:
-        logger.warning(
-            "opus_parse(%s): could not parse JSON. preview=%r",
-            filename, text[:800],
-        )
-        return []
+        # Output likely truncated by max_tokens — try to salvage the complete
+        # chunk objects that arrived before the cut-off.
+        salvaged = _salvage_complete_chunks_from_truncated(text)
+        if salvaged:
+            logger.warning(
+                "opus_parse(%s): JSON parse failed (stop=%s); salvaged %d complete chunks from truncated output",
+                filename, stop_reason, len(salvaged),
+            )
+            parsed = {"chunks": salvaged}
+        else:
+            logger.warning(
+                "opus_parse(%s): could not parse JSON. preview=%r",
+                filename, text[:800],
+            )
+            return []
 
     raw_chunks = parsed.get("chunks") or []
     cleaned = []

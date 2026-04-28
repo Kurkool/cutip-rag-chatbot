@@ -539,3 +539,94 @@ async def test_ingest_v2_text_layer_routes_to_document_mode(monkeypatch, tiny_te
     )
 
     assert captured["mode"] == "document"
+
+
+# ---------------------------------------------------------------------------
+# _salvage_complete_chunks_from_truncated — recover from max_tokens truncation
+# ---------------------------------------------------------------------------
+
+
+def test_salvage_chunks_extracts_complete_objects_from_truncated():
+    """When JSON is truncated mid-array, salvage extracts the complete preceding objects."""
+    text = (
+        '```json\n'
+        '{\n'
+        '  "chunks": [\n'
+        '    {"text": "first chunk", "page": 1, "section_path": "Intro", "has_table": false},\n'
+        '    {"text": "second chunk", "page": 2, "section_path": "", "has_table": true},\n'
+        '    {"text": "third chunk truncated mid-w'
+    )
+    chunks = ingestion_v2._salvage_complete_chunks_from_truncated(text)
+    assert len(chunks) == 2
+    assert chunks[0]["text"] == "first chunk"
+    assert chunks[0]["page"] == 1
+    assert chunks[1]["text"] == "second chunk"
+    assert chunks[1]["has_table"] is True
+
+
+def test_salvage_chunks_handles_no_chunks_marker():
+    """If `"chunks":` array marker is missing, return empty list."""
+    text = "just some random prose without any json"
+    assert ingestion_v2._salvage_complete_chunks_from_truncated(text) == []
+
+
+def test_salvage_chunks_handles_truncation_before_first_object():
+    """Truncated before any complete object → empty list, no crash."""
+    text = '```json\n{\n  "chunks": ['
+    assert ingestion_v2._salvage_complete_chunks_from_truncated(text) == []
+
+
+def test_salvage_chunks_handles_complete_array_unchanged():
+    """A complete (non-truncated) JSON output should also yield all chunks."""
+    text = (
+        '```json\n'
+        '{"chunks": [\n'
+        '  {"text": "a", "page": 1, "section_path": "", "has_table": false},\n'
+        '  {"text": "b", "page": 2, "section_path": "", "has_table": false}\n'
+        ']}\n'
+        '```'
+    )
+    chunks = ingestion_v2._salvage_complete_chunks_from_truncated(text)
+    assert len(chunks) == 2
+    assert chunks[0]["text"] == "a"
+    assert chunks[1]["text"] == "b"
+
+
+def test_salvage_chunks_handles_empty_or_none():
+    assert ingestion_v2._salvage_complete_chunks_from_truncated("") == []
+    assert ingestion_v2._salvage_complete_chunks_from_truncated(None) == []
+
+
+@pytest.mark.asyncio
+async def test_opus_parse_and_chunk_salvages_chunks_on_truncated_response(
+    monkeypatch, tiny_text_pdf_bytes
+):
+    """When fence parse fails, fall back to salvage; recover complete chunks before truncation."""
+    from langchain_core.messages import AIMessage
+    from unittest.mock import AsyncMock, MagicMock
+
+    truncated = (
+        '```json\n{\n  "chunks": [\n'
+        '    {"text": "alpha", "page": 1, "section_path": "S", "has_table": false},\n'
+        '    {"text": "beta", "page": 2, "section_path": "", "has_table": false},\n'
+        '    {"text": "gamma is cut o'
+    )
+
+    async def fake_ainvoke(messages):
+        return AIMessage(content=truncated)
+
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(side_effect=fake_ainvoke)
+    monkeypatch.setattr(ingestion_v2, "_get_opus_llm", lambda: fake_llm)
+
+    chunks = await ingestion_v2.opus_parse_and_chunk(
+        pdf_bytes=tiny_text_pdf_bytes,
+        hyperlinks=[],
+        filename="x.pdf",
+        mode="document",
+    )
+
+    assert len(chunks) == 2
+    assert chunks[0].page_content == "alpha"
+    assert chunks[0].metadata == {"page": 1, "section_path": "S", "has_table": False}
+    assert chunks[1].page_content == "beta"
