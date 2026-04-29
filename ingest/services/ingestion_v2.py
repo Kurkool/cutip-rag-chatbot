@@ -181,15 +181,20 @@ def _get_opus_llm():
     return ChatAnthropic(
         model=settings.OCR_MODEL,
         anthropic_api_key=settings.ANTHROPIC_API_KEY,
-        # 64K output budget: empirically a 24-page Thai legal scan
-        # (ประกาศจุฬาฯ 2563.pdf via image blocks) emits ~36K chars / ~32K
-        # output tokens — the prior 32K cap truncated mid-array and a
-        # JSON parse failed. The salvage helper recovers partial output
-        # when the cap is still hit; raising the cap to 64K reduces how
-        # often that fallback fires for typical Thai legal documents.
-        max_tokens=64000,
+        # 128K is Opus 4.7's max output ceiling (1M context, 128K out).
+        # Adaptive thinking shares this budget with text output, so for
+        # dense Thai legal scans (where Opus emitted 44K out_tok on a
+        # 24-page success and got cut off at 32K on a prior failure)
+        # this gives ~3× headroom. Salvage helper still recovers partial
+        # chunks if Opus exceeds even this on edge cases.
+        max_tokens=128000,
         max_retries=3,
         thinking={"type": "adaptive"},
+        # Bypass the SDK's "estimated >10min" guard that refuses
+        # non-streaming requests with very large max_tokens. We use
+        # ainvoke (not stream) — the Cloud Run service is configured
+        # with --timeout=3600 so a 10-minute request fits comfortably.
+        timeout=600.0,
     )
 
 
