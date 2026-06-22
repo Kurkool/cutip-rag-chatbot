@@ -28,3 +28,8 @@ htmlcov/
 
 # Logs
 *.log
+
+# IS thesis docs moved to private repo (../is-docs/)
+docs/is-book/
+docs/is-onepage/
+docs/thesis-project-detail.md
