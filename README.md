@@ -138,7 +138,6 @@ Adapt the module path (`chat.main:app`, `ingest.main:app`, `admin.main:app`) per
 
 ```
 cutip-rag-chatbot/
-├── CLAUDE.md               ← Claude Code project guide (deeper detail than this README)
 ├── README.md               ← this file
 ├── chat/                   ← LINE webhook + agentic RAG + search
 ├── ingest/                 ← Document pipeline (Opus 4.7 universal parser)
@@ -151,10 +150,8 @@ cutip-rag-chatbot/
 ├── docker-compose.yml
 ├── pytest.ini
 ├── requirements.txt
-└── .gcloudignore           ← excludes .venv/, tests/, docs/ from Cloud Build context
+└── .gcloudignore           ← excludes .venv/, tests/ from Cloud Build context
 ```
-
-Architectural detail and design notes that go beyond what this README covers live in `CLAUDE.md` (the project guide used by Claude Code during development).
 
 ## Deploy to Cloud Run
 
@@ -225,7 +222,7 @@ The `audit/` and `diag/` scripts fetch secrets from GCP Secret Manager on demand
 
 ## Critical gotchas
 
-Cross-machine pitfalls you will hit if you are not aware of them. The full list of 17 gotchas is in `CLAUDE.md`; these are the ones most likely to surprise a new maintainer.
+Cross-machine pitfalls you will hit if you are not aware of them. These are the ones most likely to surprise a new maintainer.
 
 1. **Opus 4.7 adaptive thinking returns a list of content blocks, not a string.** Both `chat/services/agent.py::run_agent` and `ingest/services/vision.py::parse_page_image` extract text blocks explicitly. If you miss this when adding a new code path, you get intermittent 500 errors with a stringified Python list as the answer.
 
@@ -243,7 +240,6 @@ Cross-machine pitfalls you will hit if you are not aware of them. The full list 
 
 8. **Always set `sys.stdout.reconfigure(encoding='utf-8')` at the top of any script that prints Thai, emoji, or arrows on Windows.** Otherwise cp874 crashes the script with `UnicodeEncodeError`. All existing scripts in `scripts/` follow this pattern.
 
-For the complete list see `CLAUDE.md` in this repository.
 
 ## Related repository
 

@@ -29,7 +29,5 @@ htmlcov/
 # Logs
 *.log
 
-# All docs (including CLAUDE.md) moved to private repo (../is-docs/) on 2026-05-26.
-# This repo is now code-only.
 docs/
 CLAUDE.md

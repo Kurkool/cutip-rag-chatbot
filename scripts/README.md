@@ -8,6 +8,12 @@ Run pattern (from `cutip-rag-chatbot/` directory):
 PYTHONPATH=. .venv/Scripts/python.exe scripts/<subdir>/<name>.py
 ```
 
+Scripts that read sample source documents (`assess_hsm.py`, `compare_v1_v2.py`, `audit_ingestion.py`, `audit_v2.py`) require the `SAMPLE_DOC_DIR` environment variable pointing at the directory that contains `cutip-doc/` and `hsm-doc/` subdirectories:
+
+```bash
+SAMPLE_DOC_DIR=/path/to/sample-doc PYTHONPATH=. .venv/Scripts/python.exe scripts/audit/full_audit.py
+```
+
 ## Categories
 
 ### `audit/` — Recurring quality checks
@@ -39,7 +45,7 @@ PYTHONPATH=. .venv/Scripts/python.exe scripts/<subdir>/<name>.py
 
 | Script | Purpose |
 |---|---|
-| `audit_ingestion.py` | Per-PDF detailed audit in `is-docs/sample-doc/cutip-doc/` — surfaces chunks per source file. |
+| `audit_ingestion.py` | Per-PDF detailed audit of files under `$SAMPLE_DOC_DIR/cutip-doc/` — surfaces chunks per source file. |
 | `audit_v2.py` | Local v2 ingest driver (direct `ingest_v2()` call, NOT Cloud Run). Useful for prompt iteration. Non-PDF formats fail locally because LibreOffice isn't installed on dev machine. |
 | `deep_recheck.py` | Deep verification — broader than smoke, narrower than full_audit. |
 | `diag_new_doc.py` | Diagnose ingestion issues when a new document doesn't behave as expected. |

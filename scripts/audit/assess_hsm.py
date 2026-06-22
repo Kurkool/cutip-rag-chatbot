@@ -7,6 +7,7 @@ For each PDF:
 - Pages with low text (likely-scanned)
 - Quick OCR-complexity red flags
 """
+import os
 import sys
 from pathlib import Path
 
@@ -14,7 +15,10 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import fitz
 
-DOC_DIR = Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\hsm-doc")
+_base = os.environ.get("SAMPLE_DOC_DIR")
+if not _base:
+    raise SystemExit("Set SAMPLE_DOC_DIR env var (path to sample-doc base directory containing cutip-doc/ and hsm-doc/)")
+DOC_DIR = Path(_base) / "hsm-doc"
 
 
 def pct_thai(text: str) -> float:

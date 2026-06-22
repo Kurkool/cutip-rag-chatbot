@@ -10,12 +10,16 @@ from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 
+import os
 import fitz
 import pandas as pd
 from docx import Document as DocxDocument
 from pinecone import Pinecone
 
-SAMPLE_DIR = Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\cutip-doc")
+_base = os.environ.get("SAMPLE_DOC_DIR")
+if not _base:
+    raise SystemExit("Set SAMPLE_DOC_DIR env var (path to sample-doc base directory containing cutip-doc/ and hsm-doc/)")
+SAMPLE_DIR = Path(_base) / "cutip-doc"
 NS_V1 = "cutip_01"
 NS_V2 = "cutip_v2_audit"
 

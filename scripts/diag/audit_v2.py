@@ -1,8 +1,11 @@
-"""Ingest every file in sample-doc/* into namespace cutip_v2_audit via v2.
+"""Ingest every file under SAMPLE_DOC_DIR/{cutip-doc,hsm-doc} into the v2 namespace.
 
-Used to empirically compare v2 output against v1 production (cutip_01) via
-the audit scripts in this folder. Safe to re-run — v2 uses the same
-atomic-swap upsert as v1, so re-ingesting replaces prior v2 chunks.
+Used to empirically compare v2 output against v1 production via the audit
+scripts in this folder. Safe to re-run — v2 uses the same atomic-swap
+upsert as v1, so re-ingesting replaces prior v2 chunks.
+
+Set the SAMPLE_DOC_DIR env var to the path containing cutip-doc/ and
+hsm-doc/ subdirectories before running.
 """
 from __future__ import annotations
 
@@ -36,9 +39,12 @@ _load_anthropic_key_from_secret_manager()
 
 from ingest.services.ingestion_v2 import ingest_v2
 
+_base = os.environ.get("SAMPLE_DOC_DIR")
+if not _base:
+    raise SystemExit("Set SAMPLE_DOC_DIR env var (path to sample-doc base directory containing cutip-doc/ and hsm-doc/)")
 SAMPLE_DIRS = [
-    Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\cutip-doc"),
-    Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\hsm-doc"),
+    Path(_base) / "cutip-doc",
+    Path(_base) / "hsm-doc",
 ]
 NAMESPACE = "cutip_v2_audit"
 TENANT_ID = "cutip_v2_audit"
