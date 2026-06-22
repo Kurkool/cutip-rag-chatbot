@@ -15,7 +15,7 @@ import pandas as pd
 from docx import Document as DocxDocument
 from pinecone import Pinecone
 
-SAMPLE_DIR = Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\sample-doc\cutip-doc")
+SAMPLE_DIR = Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\cutip-doc")
 NS_V1 = "cutip_01"
 NS_V2 = "cutip_v2_audit"
 

@@ -14,7 +14,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import fitz
 
-DOC_DIR = Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\sample-doc\hsm-doc")
+DOC_DIR = Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\hsm-doc")
 
 
 def pct_thai(text: str) -> float:

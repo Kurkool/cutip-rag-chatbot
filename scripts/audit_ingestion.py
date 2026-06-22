@@ -19,7 +19,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 import fitz
 from pinecone import Pinecone
 
-SAMPLE_DIR = Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\sample-doc\cutip-doc")
+SAMPLE_DIR = Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\cutip-doc")
 
 # Phrases Haiku Vision emits when it fails/refuses OCR. Any chunk containing
 # these is garbage content, not real document text.

@@ -37,8 +37,8 @@ _load_anthropic_key_from_secret_manager()
 from ingest.services.ingestion_v2 import ingest_v2
 
 SAMPLE_DIRS = [
-    Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\sample-doc\cutip-doc"),
-    Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\sample-doc\hsm-doc"),
+    Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\cutip-doc"),
+    Path(r"C:\Users\USER\PycharmProjects\TIP-RAG\is-docs\sample-doc\hsm-doc"),
 ]
 NAMESPACE = "cutip_v2_audit"
 TENANT_ID = "cutip_v2_audit"
